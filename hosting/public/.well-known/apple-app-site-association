@@ -1,0 +1,10 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["YOUR_APPLE_TEAM_ID.com.ridetogether.app"],
+        "components": [{ "/": "/join/*", "comment": "Ride invites" }]
+      }
+    ]
+  }
+}

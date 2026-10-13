@@ -1,0 +1,41 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "groups": {
+      "$code": {
+        ".validate": "$code.matches(/^[A-Z0-9]{6}$/)",
+        ".read": "auth != null && data.child('members').child(auth.uid).exists()",
+
+        "meta": {
+          ".read": "auth != null",
+          ".write": "auth != null && !data.exists() && newData.child('createdBy').val() === auth.uid",
+          ".validate": "newData.hasChildren(['name', 'createdBy', 'createdAt']) && newData.child('name').isString() && newData.child('name').val().length <= 60"
+        },
+
+        "members": {
+          "$uid": {
+            ".read": "auth != null && auth.uid === $uid",
+            ".write": "auth != null && auth.uid === $uid && (root.child('groups').child($code).child('meta').exists() || newData.parent().parent().child('meta').exists())",
+            ".validate": "!newData.exists() || (newData.hasChildren(['name', 'color', 'joinedAt']) && newData.child('name').isString() && newData.child('name').val().length <= 40)"
+          }
+        },
+
+        "locations": {
+          "$uid": {
+            ".write": "auth != null && auth.uid === $uid && (root.child('groups').child($code).child('members').child(auth.uid).exists() || !newData.exists())",
+            "lat": { ".validate": "newData.isNumber() && newData.val() >= -90 && newData.val() <= 90" },
+            "lng": { ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180" },
+            "ts": { ".validate": "newData.isNumber() && newData.val() <= now + 60000" },
+            "status": { ".validate": "newData.val() === 'ok' || newData.val() === 'stop' || newData.val() === 'sos'" },
+            "heading": { ".validate": "newData.isNumber()" },
+            "speed": { ".validate": "newData.isNumber()" },
+            "accuracy": { ".validate": "newData.isNumber()" },
+            "battery": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
+          }
+        }
+      }
+    }
+  }
+}

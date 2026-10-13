@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Join the ride · RideTogether</title>
+<!-- WhatsApp link preview -->
+<meta property="og:title" content="🏍️ You're invited to a group ride">
+<meta property="og:description" content="Tap to join the live group map on RideTogether so nobody gets lost.">
+<style>
+  :root{--bg:#0E0F12;--card:#17191E;--text:#F4F5F7;--dim:#9AA0AA;--accent:#FF6B00}
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;padding:16px}
+  .card{width:100%;max-width:420px;background:var(--card);border:1px solid #2E323A;border-radius:22px;padding:28px 22px;text-align:center}
+  .kicker{color:var(--accent);font-weight:800;letter-spacing:1px;font-size:12px}
+  h1{margin:8px 0 4px;font-size:26px}
+  .code{font-size:44px;font-weight:900;letter-spacing:10px;margin:18px 0;padding-left:10px}
+  a.btn{display:block;text-decoration:none;font-weight:800;font-size:17px;padding:16px;border-radius:14px;margin-top:12px}
+  .primary{background:var(--accent);color:#0E0F12}
+  .secondary{background:#22252C;color:var(--text)}
+  p{color:var(--dim);font-size:14px;line-height:1.45}
+</style>
+</head>
+<body>
+<div class="card">
+  <div style="font-size:48px">🏍️</div>
+  <div class="kicker">YOU'RE INVITED TO A GROUP RIDE</div>
+  <h1>Join on RideTogether</h1>
+  <div class="code" id="code">······</div>
+  <a class="btn primary" id="open" href="#">Open in the app</a>
+  <a class="btn secondary" id="store" href="#">Get the app</a>
+  <p>Already installed but the button doesn't work? Open RideTogether and enter the code above.</p>
+</div>
+<script>
+  // ---- configure these once your app is on the stores ----
+  var ANDROID_PACKAGE = 'com.ridetogether.app';
+  var PLAY_URL = 'https://play.google.com/store/apps/details?id=' + ANDROID_PACKAGE;
+  var APP_STORE_URL = 'https://apps.apple.com/app/idYOUR_APP_ID';
+  // ---------------------------------------------------------
+
+  var m = location.pathname.match(/\/join\/([A-Za-z0-9]{6})/);
+  var code = m ? m[1].toUpperCase() : '';
+  document.getElementById('code').textContent = code || '??????';
+
+  var ua = navigator.userAgent || '';
+  var isAndroid = /Android/i.test(ua);
+  var isIOS = /iPhone|iPad|iPod/i.test(ua);
+
+  var schemeUrl = 'ridetogether://join/' + code;
+  var openUrl = isAndroid
+    ? 'intent://join/' + code + '#Intent;scheme=ridetogether;package=' + ANDROID_PACKAGE +
+      ';S.browser_fallback_url=' + encodeURIComponent(PLAY_URL) + ';end'
+    : schemeUrl;
+
+  document.getElementById('open').href = openUrl;
+  document.getElementById('store').href = isIOS ? APP_STORE_URL : PLAY_URL;
+
+  // Try to jump straight into the app (works when App Links / Universal Links aren't verified yet)
+  if (code && (isAndroid || isIOS)) {
+    setTimeout(function () { location.href = openUrl; }, 300);
+  }
+</script>
+</body>
+</html>

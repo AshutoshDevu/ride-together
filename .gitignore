@@ -39,3 +39,12 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# secrets
+.env
+
+# generated native projects (Continuous Native Generation)
+/android
+/ios
+
+.firebase/
