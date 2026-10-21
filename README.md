@@ -54,8 +54,9 @@ app.config.ts                app name, bundle id, permissions, map keys
 
 ## Try it locally in the browser (no accounts needed)
 
-Runs the app against the Firebase emulators, with a Leaflet map standing in for Google Maps on web
-(`src/web/react-native-maps.tsx`, swapped in by `metro.config.js`; phones still use Google Maps).
+Runs the app against the Firebase emulators. On web, `react-native-maps` (native only) is swapped for
+`src/web/react-native-maps.tsx` by `metro.config.js` — the same API on top of the Google Maps JavaScript API,
+using `EXPO_PUBLIC_GOOGLE_MAPS_WEB_KEY` (a browser key restricted to the site + localhost:5050/8081).
 
 ```bash
 npm install

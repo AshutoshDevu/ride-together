@@ -115,6 +115,32 @@ export async function startTracking(groupName: string): Promise<TrackingMode> {
 
 async function startForegroundWatch() {
   stopForegroundWatch();
+  if (Platform.OS === 'web') {
+    // expo-location's web watcher tags updates with the browser's watch id instead of its own,
+    // so they never reach our callback — talk to the browser directly instead.
+    let last: Location.LocationObject | null = null;
+    const id = navigator.geolocation.watchPosition(
+      (p) => {
+        const { latitude, longitude, altitude, accuracy, altitudeAccuracy, heading, speed } = p.coords;
+        last = {
+          coords: { latitude, longitude, altitude, accuracy, altitudeAccuracy, heading, speed },
+          timestamp: p.timestamp,
+        };
+        publish(last).catch(onPublishError);
+      },
+      (e) => console.warn('[tracking] browser location error', e.message),
+      { enableHighAccuracy: true, maximumAge: 5000 },
+    );
+    // A laptop barely moves, so the browser rarely reports — re-send so it doesn't show as "Signal lost"
+    const heartbeat = setInterval(() => last && publish(last).catch(onPublishError), 30_000);
+    foregroundSub = {
+      remove: () => {
+        navigator.geolocation.clearWatch(id);
+        clearInterval(heartbeat);
+      },
+    };
+    return;
+  }
   foregroundSub = await Location.watchPositionAsync(
     { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 20 },
     (loc) => publish(loc).catch(onPublishError),

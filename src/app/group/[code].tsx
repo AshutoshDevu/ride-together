@@ -35,7 +35,6 @@ const LABELS_MAX_DELTA = 0.6; // hide name tags when zoomed far out (big groups 
 
 type Sharing = 'starting' | TrackingMode | 'paused' | 'error';
 
-// On a laptop/browser you usually just want to watch the group, so sharing starts off
 const IS_WEB = Platform.OS === 'web';
 
 export default function GroupMap() {
@@ -49,7 +48,7 @@ export default function GroupMap() {
   const [riders, setRiders] = useState<Rider[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [myPos, setMyPos] = useState<LatLng | null>(null);
-  const [sharing, setSharing] = useState<Sharing>(IS_WEB ? 'paused' : 'starting');
+  const [sharing, setSharing] = useState<Sharing>('starting');
   const [showList, setShowList] = useState(false);
   const [showInvite, setShowInvite] = useState(params.invite === '1');
   const [keepAwake, setKeepAwake] = useState(false);
@@ -120,7 +119,7 @@ export default function GroupMap() {
 
   const startedOnce = useRef(false);
   useEffect(() => {
-    if (meta && !meta.endedAt && !startedOnce.current && !IS_WEB) {
+    if (meta && !meta.endedAt && !startedOnce.current) {
       startedOnce.current = true;
       start();
     }
@@ -304,9 +303,9 @@ export default function GroupMap() {
 
   const sharingLabel =
     sharing === 'background' ? 'Sharing · background'
-    : sharing === 'foreground' ? 'Sharing · app open only'
+    : sharing === 'foreground' ? (IS_WEB ? 'Sharing · keep this tab open' : 'Sharing · app open only')
     : sharing === 'starting' ? 'Starting GPS…'
-    : sharing === 'paused' ? (IS_WEB ? 'Watching — tap to share me' : 'Paused — tap to share')
+    : sharing === 'paused' ? 'Paused — tap to share'
     : 'Location off — tap to retry';
   const sharingOn = sharing === 'background' || sharing === 'foreground';
 
