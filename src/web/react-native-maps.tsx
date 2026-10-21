@@ -29,12 +29,18 @@ type MapViewProps = {
   style?: StyleProp<ViewStyle>;
   children?: ReactNode;
   showsUserLocation?: boolean;
-  onUserLocationChange?: (e: { nativeEvent: { coordinate?: LatLng } }) => void;
+  onUserLocationChange?: (e: { nativeEvent: { coordinate?: LatLng & { heading?: number | null; speed?: number | null } } }) => void;
+  /** Fired when the user starts dragging the map by hand */
+  onPanDrag?: () => void;
   onRegionChangeComplete?: (r: Region) => void;
+  /** Right-click on a laptop, long-press on a touch screen */
+  onLongPress?: (e: { nativeEvent: { coordinate: LatLng } }) => void;
   mapPadding?: EdgePadding;
 } & Record<string, any>;
 
 export type MapViewHandle = {
+  /** heading / pitch need a vector map (cloud Map ID) on the web, so only centre + zoom are applied */
+  animateCamera: (c: { center?: LatLng; zoom?: number; heading?: number; pitch?: number }, opts?: { duration?: number }) => void;
   animateToRegion: (r: Region, duration?: number) => void;
   fitToCoordinates: (coords: LatLng[], opts?: { edgePadding?: EdgePadding; animated?: boolean }) => void;
 };
@@ -119,14 +125,14 @@ function regionOf(map: google.maps.Map): Region | null {
 const MapContext = createContext<google.maps.Map | null>(null);
 
 const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
-  { style, children, showsUserLocation, onUserLocationChange, onRegionChangeComplete, mapPadding },
+  { style, children, showsUserLocation, onUserLocationChange, onRegionChangeComplete, onLongPress, onPanDrag, mapPadding },
   ref,
 ) {
   const el = useRef<HTMLDivElement | null>(null);
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
-  const cbs = useRef({ onUserLocationChange, onRegionChangeComplete });
-  cbs.current = { onUserLocationChange, onRegionChangeComplete };
+  const cbs = useRef({ onUserLocationChange, onRegionChangeComplete, onLongPress, onPanDrag });
+  cbs.current = { onUserLocationChange, onRegionChangeComplete, onLongPress, onPanDrag };
   const pad = mapPadding ?? { top: 0, right: 0, bottom: 0, left: 0 };
 
   useEffect(() => {
@@ -144,10 +150,19 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           styles: DARK_STYLE,
           backgroundColor: '#0E0F12',
           disableDefaultUI: true,
-          zoomControl: true,
+          // Pinch / scroll-wheel zoom; the +/- control would sit under the app's bottom bar
+          zoomControl: false,
           clickableIcons: false,
           gestureHandling: 'greedy',
         });
+        m.addListener('contextmenu', (e: google.maps.MapMouseEvent) => {
+          if (e.latLng) {
+            cbs.current.onLongPress?.({
+              nativeEvent: { coordinate: { latitude: e.latLng.lat(), longitude: e.latLng.lng() } },
+            });
+          }
+        });
+        m.addListener('dragstart', () => cbs.current.onPanDrag?.());
         m.addListener('idle', () => {
           const r = regionOf(m);
           if (r) cbs.current.onRegionChangeComplete?.(r);
@@ -184,7 +199,9 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           });
         } else dot.setPosition(pos);
         cbs.current.onUserLocationChange?.({
-          nativeEvent: { coordinate: { latitude: pos.lat, longitude: pos.lng } },
+          nativeEvent: {
+            coordinate: { latitude: pos.lat, longitude: pos.lng, heading: p.coords.heading, speed: p.coords.speed },
+          },
         });
       },
       () => {},
@@ -199,6 +216,11 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   useImperativeHandle(
     ref,
     () => ({
+      animateCamera: (c) => {
+        if (!map) return;
+        if (c.zoom != null && Math.round(map.getZoom() ?? 0) !== Math.round(c.zoom)) map.setZoom(c.zoom);
+        if (c.center) map.panTo({ lat: c.center.latitude, lng: c.center.longitude });
+      },
       animateToRegion: (r) => {
         if (!map) return;
         const bounds = new google.maps.LatLngBounds(
@@ -282,4 +304,29 @@ export function Marker({ coordinate, children, onPress, zIndex = 0 }: MarkerProp
   }, [holder, zIndex]);
 
   return createPortal(children, holder);
+}
+
+type PolylineProps = {
+  coordinates: LatLng[];
+  strokeColor?: string;
+  strokeWidth?: number;
+  zIndex?: number;
+} & Record<string, any>;
+
+export function Polyline({ coordinates, strokeColor = '#FF6B00', strokeWidth = 4, zIndex = 0 }: PolylineProps) {
+  const map = useContext(MapContext);
+  useEffect(() => {
+    if (!map) return;
+    const line = new google.maps.Polyline({
+      map,
+      path: coordinates.map((c) => ({ lat: c.latitude, lng: c.longitude })),
+      strokeColor,
+      strokeWeight: strokeWidth,
+      strokeOpacity: 0.9,
+      zIndex,
+      clickable: false,
+    });
+    return () => line.setMap(null);
+  }, [map, coordinates, strokeColor, strokeWidth, zIndex]);
+  return null;
 }

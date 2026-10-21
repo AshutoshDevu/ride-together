@@ -18,6 +18,7 @@ import { db } from './firebase';
  * groups/{CODE}/meta                 { name, createdBy, createdAt }
  * groups/{CODE}/members/{uid}        { name, color, joinedAt }
  * groups/{CODE}/locations/{uid}      { lat, lng, heading, speed, accuracy, battery, status, ts }
+ * groups/{CODE}/destination          { lat, lng, name, address, polyline?, distanceM?, durationS?, setAt } (leader only)
  */
 
 export type RiderStatus = 'ok' | 'stop' | 'sos';
@@ -37,6 +38,19 @@ export type RiderLocation = {
 };
 
 export type Rider = Member & { uid: string; loc?: RiderLocation };
+
+/** Where the whole group is heading — set by the leader, the same route for every rider. */
+export type Destination = {
+  lat: number;
+  lng: number;
+  name: string;
+  address?: string;
+  /** Google encoded polyline of the two-wheeler route from the leader's position when it was set */
+  polyline?: string | null;
+  distanceM?: number | null;
+  durationS?: number | null;
+  setAt: number;
+};
 
 // No 0/O/1/I/L — easy to read out loud on the roadside
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -112,6 +126,14 @@ export async function endRide(code: string) {
   });
 }
 
+export async function setDestination(code: string, d: Omit<Destination, 'setAt'>) {
+  await set(ref(db, `groups/${code}/destination`), { ...d, setAt: serverTimestamp() });
+}
+
+export async function clearDestination(code: string) {
+  await remove(ref(db, `groups/${code}/destination`));
+}
+
 export async function isMember(code: string, uid: string): Promise<boolean> {
   const snap = await get(ref(db, `groups/${code}/members/${uid}`));
   return snap.exists();
@@ -133,12 +155,13 @@ export async function clearMyLocation(code: string, uid: string) {
 /** Live view of the whole group: meta + members merged with their latest location. */
 export function subscribeGroup(
   code: string,
-  onChange: (state: { meta: GroupMeta | null; riders: Rider[] }) => void,
+  onChange: (state: { meta: GroupMeta | null; riders: Rider[]; destination: Destination | null }) => void,
   onError: (e: Error) => void,
 ): Unsubscribe {
   let meta: GroupMeta | null = null;
   let members: Record<string, Member> = {};
   let locations: Record<string, RiderLocation> = {};
+  let destination: Destination | null = null;
 
   const emit = () => {
     const riders: Rider[] = Object.entries(members).map(([uid, m]) => ({
@@ -146,13 +169,14 @@ export function subscribeGroup(
       ...m,
       loc: locations[uid] && typeof locations[uid].lat === 'number' ? locations[uid] : undefined,
     }));
-    onChange({ meta, riders });
+    onChange({ meta, riders, destination });
   };
 
   const unsubs = [
     onValue(ref(db, `groups/${code}/meta`), (s) => { meta = s.val(); emit(); }, onError),
     onValue(ref(db, `groups/${code}/members`), (s) => { members = s.val() ?? {}; emit(); }, onError),
     onValue(ref(db, `groups/${code}/locations`), (s) => { locations = s.val() ?? {}; emit(); }, onError),
+    onValue(ref(db, `groups/${code}/destination`), (s) => { destination = s.val(); emit(); }, onError),
   ];
   return () => unsubs.forEach((u) => u());
 }

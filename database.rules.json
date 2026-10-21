@@ -54,6 +54,37 @@
               ".validate": false
             }
           }
+        },
+        "destination": {
+          ".write": "auth != null && root.child('groups').child($code).child('meta').child('createdBy').val() === auth.uid && !root.child('groups').child($code).child('meta').child('endedAt').exists()",
+          ".validate": "newData.hasChildren(['lat', 'lng', 'name', 'setAt'])",
+          "lat": {
+            ".validate": "newData.isNumber() && newData.val() >= -90 && newData.val() <= 90"
+          },
+          "lng": {
+            ".validate": "newData.isNumber() && newData.val() >= -180 && newData.val() <= 180"
+          },
+          "name": {
+            ".validate": "newData.isString() && newData.val().length <= 120"
+          },
+          "address": {
+            ".validate": "newData.isString() && newData.val().length <= 300"
+          },
+          "polyline": {
+            ".validate": "newData.isString() && newData.val().length <= 200000"
+          },
+          "distanceM": {
+            ".validate": "newData.isNumber()"
+          },
+          "durationS": {
+            ".validate": "newData.isNumber()"
+          },
+          "setAt": {
+            ".validate": "newData.isNumber() && newData.val() <= now + 60000"
+          },
+          "$other": {
+            ".validate": false
+          }
         }
       }
     }

@@ -3,8 +3,10 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { onValue, ref } from 'firebase/database';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import MapView, { PROVIDER_GOOGLE, type Region } from 'react-native-maps';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { DestinationPicker } from '../../components/DestinationPicker';
+import { NavBanner, NavFooter } from '../../components/NavigationHUD';
 import { RiderList, type RiderRow } from '../../components/RiderList';
 import { RiderMarker } from '../../components/RiderMarker';
 import { Button } from '../../components/ui';
@@ -12,20 +14,25 @@ import { confirmAction, notify } from '../../lib/dialog';
 import { db } from '../../lib/firebase';
 import { distanceMeters, formatDistance, type LatLng } from '../../lib/geo';
 import {
+  clearDestination,
   endRide,
   inviteLink,
   isMember,
   leaveGroup,
   normalizeCode,
+  setDestination,
   setRiderStatus,
   shareInvite,
   shareToWhatsApp,
   subscribeGroup,
+  type Destination,
   type GroupMeta,
   type Rider,
   type RiderStatus,
 } from '../../lib/groups';
 import { useSession } from '../../lib/session';
+import { getCurrentFix, useTurnByTurn, type Fix } from '../../lib/navigation';
+import { computeTwoWheelerRoute, decodePolyline, formatDuration, type PlaceResult } from '../../lib/places';
 import { setActiveGroup } from '../../lib/storage';
 import { colors, radius } from '../../lib/theme';
 import { backgroundHint, startTracking, stopTracking, type TrackingMode } from '../../lib/tracking';
@@ -46,8 +53,15 @@ export default function GroupMap() {
 
   const [meta, setMeta] = useState<GroupMeta | null>(null);
   const [riders, setRiders] = useState<Rider[]>([]);
+  const [destination, setDest] = useState<Destination | null>(null);
+  const [showPicker, setShowPicker] = useState(false);
+  const [settingDest, setSettingDest] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [myPos, setMyPos] = useState<LatLng | null>(null);
+  const [myFix, setMyFix] = useState<Fix | null>(null);
+  const [navActive, setNavActive] = useState(false);
+  const [follow, setFollow] = useState(true);
+  const [voice, setVoice] = useState(true);
   const [sharing, setSharing] = useState<Sharing>('starting');
   const [showList, setShowList] = useState(false);
   const [showInvite, setShowInvite] = useState(params.invite === '1');
@@ -74,9 +88,10 @@ export default function GroupMap() {
       await setActiveGroup(code);
       unsub = subscribeGroup(
         code,
-        ({ meta, riders }) => {
+        ({ meta, riders, destination }) => {
           setMeta(meta);
           setRiders(riders);
+          setDest(destination);
           setLoaded(true);
         },
         (e) => notify('Connection problem', e.message),
@@ -127,14 +142,15 @@ export default function GroupMap() {
 
   useEffect(() => {
     // Only release the lock we actually took — deactivating an inactive tag throws
-    if (!keepAwake) return;
-    activateKeepAwakeAsync('ride');
+    if (!keepAwake && !navActive) return;
+    // Browsers may refuse the wake lock (e.g. battery saver) — not worth an error
+    activateKeepAwakeAsync('ride').catch(() => {});
     return () => {
       Promise.resolve()
         .then(() => deactivateKeepAwake('ride'))
         .catch(() => {});
     };
-  }, [keepAwake]);
+  }, [keepAwake, navActive]);
 
   // --- leader ended the ride → stop sharing everywhere ---
   const ended = !!meta?.endedAt;
@@ -148,6 +164,29 @@ export default function GroupMap() {
 
   // --- derived data ---
   const me = riders.find((r) => r.uid === uid);
+  const isLeader = !!uid && uid === meta?.createdBy;
+  const routeCoords = useMemo(
+    () => (destination?.polyline ? decodePolyline(destination.polyline) : null),
+    [destination?.polyline],
+  );
+
+  // --- in-app turn-by-turn: each rider from their own position to the shared destination ---
+  const nav = useTurnByTurn({ active: navActive, destination, fix: myFix, voice });
+  const navCoords = useMemo(() => nav.route?.steps.flatMap((st) => st.points) ?? null, [nav.route]);
+  const lastHeading = useRef(0);
+  useEffect(() => {
+    if (!navActive || !follow || !myFix) return;
+    // GPS heading is noise when standing still — keep the last good one
+    if (myFix.heading != null && myFix.heading >= 0 && (myFix.speed ?? 0) > 1.5) lastHeading.current = myFix.heading;
+    mapRef.current?.animateCamera(
+      { center: { latitude: myFix.latitude, longitude: myFix.longitude }, heading: lastHeading.current, pitch: 45, zoom: 17 },
+      { duration: 800 },
+    );
+  }, [navActive, follow, myFix]);
+  // Leader removed the destination → stop navigating
+  useEffect(() => {
+    if (!destination) setNavActive(false);
+  }, [destination]);
   const myStatus: RiderStatus = me?.loc?.status ?? 'ok';
 
   const rows: RiderRow[] = useMemo(() => {
@@ -185,6 +224,7 @@ export default function GroupMap() {
       .filter((r) => r.loc)
       .map((r) => ({ latitude: r.loc!.lat, longitude: r.loc!.lng }));
     if (myPos) coords.push(myPos);
+    if (destination) coords.push({ latitude: destination.lat, longitude: destination.lng });
     if (!coords.length) return;
     if (coords.length === 1) {
       mapRef.current?.animateToRegion({ ...coords[0], latitudeDelta: 0.02, longitudeDelta: 0.02 }, 400);
@@ -194,7 +234,7 @@ export default function GroupMap() {
       edgePadding: { top: 160, right: 60, bottom: 220, left: 60 },
       animated: true,
     });
-  }, [rows, myPos]);
+  }, [rows, myPos, destination]);
 
   useEffect(() => {
     if (!didFit.current && rows.some((r) => r.loc)) {
@@ -232,6 +272,84 @@ export default function GroupMap() {
     } catch (e: any) {
       notify('Could not update', e?.message ?? String(e));
     }
+  }
+
+  /** Leader picked a place → work out the two-wheeler route once and share it with everyone. */
+  async function applyDestination(place: PlaceResult) {
+    setShowPicker(false);
+    setSettingDest(true);
+    try {
+      const from = myPos ?? (me?.loc ? { latitude: me.loc.lat, longitude: me.loc.lng } : null);
+      const route = from
+        ? await computeTwoWheelerRoute(from, { latitude: place.lat, longitude: place.lng }).catch(() => null)
+        : null;
+      await setDestination(code, {
+        lat: place.lat,
+        lng: place.lng,
+        name: place.name.slice(0, 120),
+        address: place.address.slice(0, 300),
+        polyline: route?.polyline ?? null,
+        distanceM: route?.distanceM ?? null,
+        durationS: route?.durationS ?? null,
+      });
+      const pts = route ? decodePolyline(route.polyline) : [{ latitude: place.lat, longitude: place.lng }];
+      if (from) pts.push(from);
+      mapRef.current?.fitToCoordinates(pts, {
+        edgePadding: { top: 160, right: 60, bottom: 260, left: 60 },
+        animated: true,
+      });
+    } catch (e: any) {
+      notify('Could not set destination', e?.message ?? String(e));
+    } finally {
+      setSettingDest(false);
+    }
+  }
+
+  async function dropPin(c: { latitude: number; longitude: number }) {
+    if (!isLeader) return;
+    const ok = await confirmAction({
+      title: 'Set destination here?',
+      message: 'Everyone in the ride will see this point and the route to it.',
+      confirmText: 'Set destination',
+    });
+    if (ok) {
+      await applyDestination({
+        name: 'Pinned location',
+        address: `${c.latitude.toFixed(5)}, ${c.longitude.toFixed(5)}`,
+        lat: c.latitude,
+        lng: c.longitude,
+      });
+    }
+  }
+
+  async function confirmClearDestination() {
+    const ok = await confirmAction({
+      title: 'Remove destination?',
+      message: 'The destination and route disappear from everyone\'s map.',
+      confirmText: 'Remove',
+      destructive: true,
+    });
+    if (ok) await clearDestination(code).catch((e) => notify('Could not remove', e?.message ?? String(e)));
+  }
+
+  async function startNav() {
+    setFollow(true);
+    setShowList(false);
+    setNavActive(true);
+    // The map only reports a position when it changes — a rider standing at the start
+    // might not have one yet, so ask for it once
+    if (!myFix) {
+      try {
+        const l = await getCurrentFix();
+        setMyPos({ latitude: l.latitude, longitude: l.longitude });
+        setMyFix(l);
+      } catch {}
+    }
+  }
+
+  function exitNav() {
+    setNavActive(false);
+    setTimeout(fitAll, 300);
   }
 
   async function confirmSos() {
@@ -277,8 +395,6 @@ export default function GroupMap() {
 
   const onRegion = (r: Region) => setLabels(r.latitudeDelta < LABELS_MAX_DELTA || riders.length <= 15);
 
-  const isLeader = !!uid && uid === meta?.createdBy;
-
   if (ended) {
     return (
       <View style={styles.center}>
@@ -321,11 +437,41 @@ export default function GroupMap() {
         toolbarEnabled={false}
         onUserLocationChange={(e) => {
           const c = e.nativeEvent.coordinate;
-          if (c) setMyPos({ latitude: c.latitude, longitude: c.longitude });
+          if (!c) return;
+          setMyPos({ latitude: c.latitude, longitude: c.longitude });
+          setMyFix({ latitude: c.latitude, longitude: c.longitude, heading: c.heading, speed: c.speed });
         }}
+        // Android: 1 s location updates while navigating (default is every 5 s)
+        userLocationUpdateInterval={navActive ? 1000 : 5000}
+        userLocationFastestInterval={navActive ? 1000 : 5000}
+        userLocationPriority="high"
+        onPanDrag={() => navActive && setFollow(false)}
         onRegionChangeComplete={onRegion}
-        mapPadding={{ top: insets.top + 110, right: 0, bottom: 150, left: 0 }}
+        onLongPress={(e) => dropPin(e.nativeEvent.coordinate)}
+        mapPadding={{ top: insets.top + (navActive ? 170 : 110), right: 0, bottom: 150, left: 0 }}
       >
+        {navActive && navCoords ? (
+          <Polyline coordinates={navCoords} strokeColor="#3B8BFF" strokeWidth={7} zIndex={2} />
+        ) : (
+          routeCoords && <Polyline coordinates={routeCoords} strokeColor={colors.accent} strokeWidth={5} zIndex={1} />
+        )}
+        {destination && (
+          <Marker
+            coordinate={{ latitude: destination.lat, longitude: destination.lng }}
+            anchor={{ x: 0.5, y: 0.3 }}
+            zIndex={900}
+            tracksViewChanges={false}
+          >
+            <View style={styles.destWrap}>
+              <View style={styles.destDot}>
+                <Text style={{ fontSize: 16 }}>🏁</Text>
+              </View>
+              <View style={styles.destLabel}>
+                <Text style={styles.destLabelText} numberOfLines={1}>{destination.name}</Text>
+              </View>
+            </View>
+          </Marker>
+        )}
         {rows
           .filter((r) => r.uid !== uid) // you are the native blue dot
           .map((r) => (
@@ -343,6 +489,17 @@ export default function GroupMap() {
 
       {/* Top bar */}
       <SafeAreaView edges={['top']} style={styles.topWrap} pointerEvents="box-none">
+        {navActive && destination ? (
+          <NavBanner
+            status={nav.status}
+            error={nav.error}
+            progress={nav.progress}
+            nextStep={nav.nextStep}
+            thenStep={nav.thenStep}
+            destinationName={destination.name}
+            onRetry={nav.retry}
+          />
+        ) : (
         <View style={styles.topBar}>
           <Pressable onPress={() => router.navigate('/')} hitSlop={10} style={styles.iconBtn}>
             <Text style={styles.iconText}>‹</Text>
@@ -358,6 +515,7 @@ export default function GroupMap() {
             <Text style={styles.inviteText}>+ Invite</Text>
           </Pressable>
         </View>
+        )}
 
         {alerts.map((r) => (
           <Pressable
@@ -375,7 +533,27 @@ export default function GroupMap() {
       </SafeAreaView>
 
       {/* Map buttons */}
+      {navActive ? (
+        <View style={[styles.fabs, { bottom: 110 + insets.bottom }]}>
+          {!follow && (
+            <Pressable style={[styles.fab, { backgroundColor: '#3B8BFF' }]} onPress={() => setFollow(true)}>
+              <Text style={[styles.fabText, { color: '#fff' }]}>➤</Text>
+              <Text style={[styles.fabLabel, { color: '#fff' }]}>Re-center</Text>
+            </Pressable>
+          )}
+          <Pressable style={styles.fab} onPress={() => { setFollow(false); fitAll(); }}>
+            <Text style={styles.fabText}>⤢</Text>
+            <Text style={styles.fabLabel}>Group</Text>
+          </Pressable>
+        </View>
+      ) : (
       <View style={[styles.fabs, { bottom: (showList ? 420 : 170) + insets.bottom }]}>
+        {isLeader && (
+          <Pressable style={[styles.fab, { backgroundColor: colors.accent }]} onPress={() => setShowPicker(true)}>
+            {settingDest ? <ActivityIndicator color={colors.accentText} /> : <Text style={[styles.fabText, { color: colors.accentText }]}>📍</Text>}
+            <Text style={[styles.fabLabel, { color: colors.accentText }]}>{destination ? 'Change' : 'Go to'}</Text>
+          </Pressable>
+        )}
         <Pressable style={styles.fab} onPress={fitAll}>
           <Text style={styles.fabText}>⤢</Text>
           <Text style={styles.fabLabel}>All</Text>
@@ -389,8 +567,20 @@ export default function GroupMap() {
           <Text style={[styles.fabLabel, keepAwake && { color: colors.accentText }]}>Screen</Text>
         </Pressable>
       </View>
+      )}
 
-      {/* Bottom sheet */}
+      {/* Bottom sheet (navigation footer while navigating) */}
+      {navActive ? (
+        <NavFooter
+          progress={nav.progress}
+          voice={voice}
+          onToggleVoice={() => setVoice((v) => !v)}
+          onExit={exitNav}
+          onSos={confirmSos}
+          sosActive={myStatus === 'sos'}
+          bottomInset={insets.bottom}
+        />
+      ) : (
       <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
         <Pressable onPress={() => setShowList((s) => !s)} style={styles.sheetHandle}>
           <View style={styles.grabber} />
@@ -404,6 +594,27 @@ export default function GroupMap() {
           <Pressable onPress={isLeader ? confirmEnd : confirmLeave} style={styles.endBtn}>
             <Text style={styles.endText}>{isLeader ? '🏁 End ride for everyone' : 'Leave ride'}</Text>
           </Pressable>
+        )}
+
+        {destination && (
+          <View style={styles.destCard}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.destName} numberOfLines={1}>🏁 {destination.name}</Text>
+              <Text style={styles.destMeta} numberOfLines={1}>
+                {destination.distanceM ? `${formatDistance(destination.distanceM)} route` : 'No route yet'}
+                {destination.durationS ? ` · ~${formatDuration(destination.durationS)}` : ''}
+                {myPos ? ` · ${formatDistance(distanceMeters(myPos, { latitude: destination.lat, longitude: destination.lng }))} from you` : ''}
+              </Text>
+            </View>
+            {isLeader && (
+              <Pressable onPress={confirmClearDestination} hitSlop={8} style={styles.destX}>
+                <Text style={{ color: colors.textDim, fontSize: 18 }}>✕</Text>
+              </Pressable>
+            )}
+            <Pressable onPress={startNav} style={styles.navBtn}>
+              <Text style={styles.navText}>Navigate</Text>
+            </Pressable>
+          </View>
         )}
 
         <View style={styles.actions}>
@@ -428,6 +639,14 @@ export default function GroupMap() {
         </View>
         {sharing === 'foreground' && !IS_WEB && <Text style={styles.hint}>{backgroundHint}</Text>}
       </View>
+      )}
+
+      <DestinationPicker
+        visible={showPicker}
+        near={myPos}
+        onPick={applyDestination}
+        onClose={() => setShowPicker(false)}
+      />
 
       {/* Invite modal */}
       <Modal visible={showInvite} transparent animationType="slide" onRequestClose={() => setShowInvite(false)}>
@@ -463,6 +682,34 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg, padding: 24, gap: 10 },
   endedTitle: { color: colors.text, fontSize: 26, fontWeight: '800' },
   endedText: { color: colors.textDim, fontSize: 15, textAlign: 'center', marginBottom: 12 },
+  destWrap: { alignItems: 'center', width: 140 },
+  destDot: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 3,
+    borderColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  destLabel: { marginTop: 2, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: colors.accent, maxWidth: 140 },
+  destLabelText: { color: colors.accentText, fontSize: 11, fontWeight: '800' },
+  destCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: colors.surfaceHigh,
+    borderRadius: radius.md,
+    padding: 10,
+    paddingLeft: 14,
+    marginBottom: 4,
+  },
+  destName: { color: colors.text, fontWeight: '800', fontSize: 15 },
+  destMeta: { color: colors.textDim, fontSize: 12, marginTop: 2 },
+  destX: { padding: 6 },
+  navBtn: { backgroundColor: colors.accent, borderRadius: radius.sm, paddingHorizontal: 14, paddingVertical: 10 },
+  navText: { color: colors.accentText, fontWeight: '800', fontSize: 15 },
   endBtn: { alignItems: 'center', paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.border },
   endText: { color: colors.danger, fontWeight: '800', fontSize: 15 },
   topWrap: { position: 'absolute', top: 0, left: 0, right: 0, paddingHorizontal: 12, gap: 8 },
