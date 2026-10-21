@@ -52,25 +52,27 @@ app.config.ts                app name, bundle id, permissions, map keys
 
 ---
 
-## Try it locally in the browser (no accounts needed)
+## Local development
 
-Runs the app against the Firebase emulators. On web, `react-native-maps` (native only) is swapped for
-`src/web/react-native-maps.tsx` by `metro.config.js` — the same API on top of the Google Maps JavaScript API,
-using `EXPO_PUBLIC_GOOGLE_MAPS_WEB_KEY` (a browser key restricted to the site + localhost:5050/8081).
+Runs against the real Firebase project (`ridetogether-ashu`) — the same data as the live app.
+On web, `react-native-maps` (native only) is swapped for `src/web/react-native-maps.tsx` by
+`metro.config.js` — the same API on top of the Google Maps JavaScript API, using
+`EXPO_PUBLIC_GOOGLE_MAPS_WEB_KEY` (a browser key restricted to the site + localhost:5050/8081).
 
 ```bash
 npm install
-# .env for the demo:
-#   EXPO_PUBLIC_USE_EMULATOR=1
-#   EXPO_PUBLIC_FIREBASE_API_KEY=demo-key
-#   EXPO_PUBLIC_FIREBASE_DATABASE_URL=http://127.0.0.1:9000?ns=demo-ridetogether-default-rtdb
-#   EXPO_PUBLIC_FIREBASE_PROJECT_ID=demo-ridetogether
-npm run emulators   # terminal 1 — Firebase Auth + Realtime Database (+ hosting on :5050) emulators
-npm run web         # terminal 2 — dev server at http://localhost:8081 (the root, not /app)
-npm run simulate    # terminal 3 — 6 fake riders on a Bangalore → Nandi Hills route (prints a join link)
-                    #   pass a ride code to join your own ride: npm run simulate -- K7QM2X
-                    #   once the leader sets a destination they ride that real route
+cp .env.production .env   # real project config (public values only)
+npm run web               # dev server at http://localhost:8081 (the root, not /app)
+npm run simulate          # 6 fake riders on a Bangalore → Nandi Hills route; prints invite + dev links
+                          #   join your own ride instead: npm run simulate -- K7QM2X
+                          #   once the leader sets a destination they ride that real route
+                          #   Ctrl+C removes them again (and ends a ride the script created)
 ```
+
+Offline alternative: the Firebase emulators. Put `EXPO_PUBLIC_USE_EMULATOR=1`,
+`EXPO_PUBLIC_FIREBASE_API_KEY=demo-key`, `EXPO_PUBLIC_FIREBASE_PROJECT_ID=demo-ridetogether` and
+`EXPO_PUBLIC_FIREBASE_DATABASE_URL=http://127.0.0.1:9000?ns=demo-ridetogether-default-rtdb` in `.env`,
+then run `npm run emulators` (auth, database and hosting on :5050) alongside the commands above.
 
 Web version for laptops: `npm run deploy:web` exports the app to `hosting/public/app` under the `/app`
 base URL (`EXPO_WEB_BASE_URL`, only set for this build) using `.env.production`,

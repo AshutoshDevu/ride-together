@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /**
- * Demo helper: fills a ride on the local Firebase emulators with fake riders that move
- * along a route, so you can watch the live map without a group of real phones.
+ * Demo helper: fills a ride with fake riders that move along a route, so you can watch the
+ * live map without a group of real phones. Uses the same Firebase project as the app (.env) —
+ * the real one by default, or the local emulators when EXPO_PUBLIC_USE_EMULATOR=1.
+ * Ctrl+C cleans up: the fake riders leave, and a ride the script created is ended.
  *
  *   node scripts/simulate-ride.mjs              → creates a new ride and prints its code
  *   node scripts/simulate-ride.mjs K7QM2X       → joins an existing ride (e.g. one you created in the app)
@@ -14,8 +16,22 @@ import { deleteApp, initializeApp } from 'firebase/app';
 import { connectAuthEmulator, getAuth, signInAnonymously } from 'firebase/auth';
 import { connectDatabaseEmulator, get, getDatabase, onValue, ref, serverTimestamp, set, update } from 'firebase/database';
 
-const PROJECT = 'demo-ridetogether';
-const HOST = process.env.EMULATOR_HOST ?? '127.0.0.1';
+try {
+  process.loadEnvFile(new URL('../.env', import.meta.url));
+} catch {
+  // no .env — rely on the environment
+}
+const env = process.env;
+const USE_EMULATOR = env.EXPO_PUBLIC_USE_EMULATOR === '1';
+const HOST = env.EMULATOR_HOST ?? '127.0.0.1';
+const FIREBASE = {
+  apiKey: env.EXPO_PUBLIC_FIREBASE_API_KEY,
+  authDomain: env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  databaseURL: env.EXPO_PUBLIC_FIREBASE_DATABASE_URL,
+  projectId: env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
+  appId: env.EXPO_PUBLIC_FIREBASE_APP_ID,
+};
+const WEB_BASE = (env.EXPO_PUBLIC_INVITE_BASE_URL || '').replace(/\/$/, '');
 const TICK_MS = 2000;
 
 const RIDERS = [
@@ -92,20 +108,22 @@ function randomCode() {
 }
 
 async function connect(name) {
-  const app = initializeApp(
-    { apiKey: 'demo-key', projectId: PROJECT, databaseURL: `http://${HOST}:9000?ns=${PROJECT}-default-rtdb` },
-    name,
-  );
+  const app = initializeApp(FIREBASE, name);
   const auth = getAuth(app);
-  connectAuthEmulator(auth, `http://${HOST}:9099`, { disableWarnings: true });
   const db = getDatabase(app);
-  connectDatabaseEmulator(db, HOST, 9000);
+  if (USE_EMULATOR) {
+    connectAuthEmulator(auth, `http://${HOST}:9099`, { disableWarnings: true });
+    connectDatabaseEmulator(db, HOST, 9000);
+  }
   const { user } = await signInAnonymously(auth);
   return { app, db, uid: user.uid };
 }
 
 async function main() {
+  if (!FIREBASE.apiKey || !FIREBASE.databaseURL) throw new Error('Firebase settings missing — check .env');
+  console.log(`Firebase: ${USE_EMULATOR ? 'local emulators' : FIREBASE.projectId}`);
   let code = (process.argv[2] ?? '').toUpperCase();
+  let created = false;
   const riders = [];
   for (const [i, r] of RIDERS.entries()) {
     riders.push({ ...r, ...(await connect(`rider-${i}`)), metres: 4000 - i * 650, battery: 92 - i * 9 });
@@ -121,6 +139,7 @@ async function main() {
     await set(ref(lead.db, `groups/${code}/meta`), {
       name: 'Sunday ride → Nandi Hills', createdBy: lead.uid, createdAt: serverTimestamp(),
     });
+    created = true;
     console.log(`Created ride ${code} — "Sunday ride → Nandi Hills"`);
   }
 
@@ -130,8 +149,10 @@ async function main() {
     });
   }
   console.log(`${riders.length} riders on the road. Join in the app with code ${code}`);
-  console.log(`  or open http://localhost:8081/join/${code}  (npm run web)`);
-  console.log(`       or http://localhost:5050/app/join/${code}  (built site on the hosting emulator)\nCtrl+C to stop.\n`);
+  if (!USE_EMULATOR && WEB_BASE) console.log(`  invite link (phones & laptops): ${WEB_BASE}/join/${code}`);
+  console.log(`  dev server (npm run web):       http://localhost:8081/join/${code}`);
+  if (USE_EMULATOR) console.log(`  built site on hosting emulator: http://localhost:5050/app/join/${code}`);
+  console.log('Ctrl+C to stop (removes the fake riders).\n');
 
   // Follow the leader's shared route (real roads) whenever one is set
   onValue(ref(riders[0].db, `groups/${code}/destination`), (snap) => {
@@ -165,7 +186,24 @@ async function main() {
 
   process.on('SIGINT', async () => {
     clearInterval(timer);
-    console.log('\nStopping simulation.');
+    console.log('\nStopping simulation — cleaning up…');
+    try {
+      if (created) {
+        // Our ride: end it for everyone (also clears all positions)
+        await update(ref(riders[0].db, `groups/${code}`), { 'meta/endedAt': serverTimestamp(), locations: null });
+      }
+      // Fake riders leave (Arjun stays a member of a ride he created, like a real leader)
+      await Promise.all(
+        riders
+          .filter((_, i) => !(created && i === 0))
+          .map((r) =>
+            update(ref(r.db, `groups/${code}`), { [`members/${r.uid}`]: null, [`locations/${r.uid}`]: null }).catch(() => {}),
+          ),
+      );
+      console.log(created ? `Ride ${code} ended and fake riders removed.` : `Fake riders left ride ${code}.`);
+    } catch (e) {
+      console.warn('Cleanup failed:', e.message);
+    }
     await Promise.all(riders.map((r) => deleteApp(r.app)));
     process.exit(0);
   });
