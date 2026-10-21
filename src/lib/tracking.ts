@@ -2,7 +2,7 @@ import * as Battery from 'expo-battery';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
-import { ensureSignedIn } from './firebase';
+import { currentUid } from './firebase';
 import { publishLocation } from './groups';
 import { getActiveGroup, setActiveGroup } from './storage';
 
@@ -27,7 +27,8 @@ async function publish(loc: Location.LocationObject) {
 
   const code = await getActiveGroup();
   if (!code) return;
-  const uid = await ensureSignedIn();
+  const uid = await currentUid();
+  if (!uid) return; // signed out — no rider to share as
 
   let battery: number | null = null;
   try {

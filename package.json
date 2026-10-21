@@ -4,7 +4,9 @@
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/metro-runtime": "~57.0.17",
+    "@expo/vector-icons": "^15.0.2",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-google-signin/google-signin": "^16.1.5",
     "expo": "~57.0.28",
     "expo-audio": "~57.0.5",
     "expo-battery": "~57.0.3",
@@ -12,6 +14,7 @@
     "expo-constants": "~57.0.21",
     "expo-dev-client": "~57.0.20",
     "expo-haptics": "~57.0.3",
+    "expo-image": "~57.0.5",
     "expo-keep-awake": "~57.0.2",
     "expo-linking": "~57.0.12",
     "expo-location": "~57.0.21",
@@ -27,9 +30,11 @@
     "react-native-maps": "1.27.2",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
-    "react-native-web": "^0.21.2"
+    "react-native-web": "^0.21.2",
+    "react-native-webview": "13.16.1"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^6.0.0",
     "@types/google.maps": "^3.58.1",
     "@types/react": "~19.2.2",
     "@types/react-dom": "~19.2.0",
@@ -43,10 +48,11 @@
     "typecheck": "tsc --noEmit",
     "deploy:firebase": "npm run build:web && firebase deploy --only hosting,database",
     "web": "expo start --web",
-    "emulators": "firebase emulators:start --only auth,database,hosting --project demo-ridetogether",
+    "emulators": "firebase emulators:start --only auth,database,firestore,hosting --project demo-ridetogether",
     "simulate": "node scripts/simulate-ride.mjs",
     "build:web": "EXPO_WEB_BASE_URL=/app expo export --platform web --output-dir hosting/public/app --clear",
-    "deploy:web": "npm run build:web && firebase deploy --only hosting"
+    "deploy:web": "npm run build:web && firebase deploy --only hosting",
+    "test:rules": "node --test tests/*.test.mjs"
   },
   "private": true
 }

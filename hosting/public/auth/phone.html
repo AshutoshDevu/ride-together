@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Verifying your number · RideTogether</title>
+<!--
+  Opened inside the Android app (WebView) during phone sign-in. Firebase's phone check needs a
+  reCAPTCHA, which only runs in a browser; this page runs it, asks Firebase to send the SMS and
+  hands the verification id back to the app, which then signs in with the code the rider types.
+-->
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; font-family: system-ui, -apple-system, sans-serif;
+         background: Canvas; color: CanvasText; text-align: center; padding: 16px; }
+  p { opacity: .7; }
+</style>
+</head>
+<body>
+<div>
+  <div style="font-size:40px">🏍️</div>
+  <h2 id="msg">Checking you're not a robot…</h2>
+  <p id="sub">This only takes a moment. If a puzzle appears, solve it to get your code.</p>
+  <div id="recaptcha"></div>
+</div>
+<script type="module">
+  import { initializeApp } from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js';
+  import { getAuth, PhoneAuthProvider, RecaptchaVerifier } from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-auth.js';
+
+  const send = (m) => (window.ReactNativeWebView ? window.ReactNativeWebView.postMessage(JSON.stringify(m)) : console.log(m));
+  const phone = new URLSearchParams(location.search).get('phone');
+
+  try {
+    if (!/^\+\d{10,15}$/.test(phone || '')) throw Object.assign(new Error('Invalid phone number'), { code: 'auth/invalid-phone-number' });
+    const app = initializeApp({
+      apiKey: 'AIzaSyBTV88Uel_PxN1RdRS45p4DceLnJBu9bys',
+      authDomain: 'ridetogether-ashu.firebaseapp.com',
+      projectId: 'ridetogether-ashu',
+      appId: '1:625318271946:web:12cb9968a2aeaed4f18d33',
+    });
+    const auth = getAuth(app);
+    const verifier = new RecaptchaVerifier(auth, 'recaptcha', { size: 'invisible' });
+    const id = await new PhoneAuthProvider(auth).verifyPhoneNumber(phone, verifier);
+    document.getElementById('msg').textContent = 'Code sent ✓';
+    document.getElementById('sub').textContent = 'Go back to the app and enter it.';
+    send({ type: 'verificationId', id });
+  } catch (e) {
+    document.getElementById('msg').textContent = 'Something went wrong';
+    document.getElementById('sub').textContent = e.message || String(e);
+    send({ type: 'error', code: e.code || '', message: e.message || String(e) });
+  }
+</script>
+</body>
+</html>

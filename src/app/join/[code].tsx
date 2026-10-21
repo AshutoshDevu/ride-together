@@ -2,7 +2,6 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { NameField } from '../../components/NameField';
 import { Button } from '../../components/ui';
 import { getGroupMeta, isMember, joinGroup, normalizeCode, type GroupMeta } from '../../lib/groups';
 import { notify } from '../../lib/dialog';
@@ -17,9 +16,8 @@ export default function JoinScreen() {
   const styles = useStyles();
   const params = useLocalSearchParams<{ code: string }>();
   const code = normalizeCode(String(params.code ?? ''));
-  const { ready, uid, name, saveName, error } = useSession();
+  const { ready, uid, name, error } = useSession();
   const [meta, setMeta] = useState<GroupMeta | null | undefined>(undefined);
-  const [draft, setDraft] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
 
   useEffect(() => {
@@ -35,12 +33,11 @@ export default function JoinScreen() {
   }, [uid, code]);
 
   async function onJoin() {
-    const n = (draft ?? name).trim();
-    if (n.length < 2) return notify('Add your name', 'So the group knows which marker is you.');
+    const n = name.trim();
+    if (n.length < 2) return notify('Add your name', 'Set your rider name in the Profile tab first.');
     if (!uid) return;
     setJoining(true);
     try {
-      if (n !== name) await saveName(n);
       await joinGroup(code, uid, n);
       router.replace({ pathname: '/group/[code]', params: { code } });
     } catch (e: any) {
@@ -73,7 +70,9 @@ export default function JoinScreen() {
           <Text style={styles.kicker}>YOU'RE INVITED TO</Text>
           <Text style={styles.title}>{meta?.name}</Text>
           <Text style={styles.dim}>Code {code}</Text>
-          <NameField value={draft ?? name} onChange={setDraft} />
+          <Text style={styles.dim}>
+            Joining as <Text style={{ color: colors.text, fontWeight: '800' }}>{name}</Text>
+          </Text>
           <Button title="Join ride & share my location" onPress={onJoin} loading={joining} />
           <Text style={styles.dim}>
             Your live location is shared only with riders in this group, and only until you leave the ride.

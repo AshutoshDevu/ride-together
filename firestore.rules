@@ -1,0 +1,32 @@
+rules_version = '2';
+
+// Cloud Firestore: profiles now; clubs, forums and ride history arrive with their phases.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // A real account (Google / phone) — anonymous sessions from before accounts can't use social data
+    function signedIn() {
+      return request.auth != null && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    function optionalString(data, field, max) {
+      return !(field in data) || (data[field] is string && data[field].size() <= max);
+    }
+
+    // users/{uid} — public rider profile
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow create, update: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['displayName', 'bike', 'city', 'photoURL', 'createdAt', 'updatedAt'])
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() >= 2
+        && request.resource.data.displayName.size() <= 40
+        && optionalString(request.resource.data, 'bike', 40)
+        && optionalString(request.resource.data, 'city', 40)
+        && (!('photoURL' in request.resource.data) || request.resource.data.photoURL == null
+            || (request.resource.data.photoURL is string && request.resource.data.photoURL.size() <= 500));
+      allow delete: if false;
+    }
+  }
+}

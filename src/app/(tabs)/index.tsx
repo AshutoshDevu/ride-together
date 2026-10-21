@@ -10,26 +10,24 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { NameField } from '../components/NameField';
-import { ThemeToggle } from '../components/ThemeToggle';
-import { Button, Input } from '../components/ui';
-import { CODE_LENGTH, createGroup, getGroupMeta, isMember, joinGroup, normalizeCode } from '../lib/groups';
-import { notify } from '../lib/dialog';
-import { useSession } from '../lib/session';
-import { getActiveGroup, setActiveGroup } from '../lib/storage';
-import { makeStyles, radius, useTheme } from '../lib/theme';
+import { Button, Input } from '../../components/ui';
+import { CODE_LENGTH, createGroup, getGroupMeta, isMember, joinGroup, normalizeCode } from '../../lib/groups';
+import { notify } from '../../lib/dialog';
+import { useSession } from '../../lib/session';
+import { getActiveGroup, setActiveGroup } from '../../lib/storage';
+import { makeStyles, radius, useTheme } from '../../lib/theme';
 
 export default function Home() {
   const { colors } = useTheme();
   const styles = useStyles();
-  const { ready, error, uid, name, saveName } = useSession();
-  const [draftName, setDraftName] = useState<string | null>(null);
+  const { ready, error, uid, name } = useSession();
   const [groupName, setGroupName] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState<'create' | 'join' | null>(null);
   const [resume, setResume] = useState<{ code: string; name: string } | null>(null);
 
-  const riderName = (draftName ?? name).trim();
+  // Riders appear to the group under their profile name (edit it in the Profile tab)
+  const riderName = name.trim();
 
   useFocusEffect(
     useCallback(() => {
@@ -49,10 +47,9 @@ export default function Home() {
 
   async function withName(): Promise<string | null> {
     if (riderName.length < 2) {
-      notify('Add your name', 'Riders will see this name next to your marker on the map.');
+      notify('Add your name', 'Set your rider name in the Profile tab — the group sees it next to your marker.');
       return null;
     }
-    if (riderName !== name) await saveName(riderName);
     return riderName;
   }
 
@@ -103,10 +100,9 @@ export default function Home() {
           <View style={styles.hero}>
             <Text style={styles.logo}>🏍️</Text>
             <Text style={styles.title}>RideTogether</Text>
-            <Text style={styles.subtitle}>One live map for the whole group. Nobody gets left behind.</Text>
-            <View style={{ marginTop: 12 }}>
-              <ThemeToggle />
-            </View>
+            <Text style={styles.subtitle}>
+              {name ? `Hi ${name.split(' ')[0]} — ready to ride?` : 'One live map for the whole group. Nobody gets left behind.'}
+            </Text>
           </View>
 
           {error && (
@@ -126,8 +122,6 @@ export default function Home() {
               <Text style={{ color: colors.accentText, fontWeight: '600' }}>Tap to open map · {resume.code}</Text>
             </Pressable>
           )}
-
-          <NameField value={draftName ?? name} onChange={setDraftName} />
 
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Start a new ride</Text>

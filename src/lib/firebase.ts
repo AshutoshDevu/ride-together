@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getApp, getApps, initializeApp } from 'firebase/app';
 import * as FirebaseAuth from 'firebase/auth';
 import { connectDatabaseEmulator, getDatabase } from 'firebase/database';
+import { connectFirestoreEmulator, getFirestore } from 'firebase/firestore';
 import { Platform } from 'react-native';
 
 const firebaseConfig = {
@@ -36,6 +37,8 @@ function createAuth(): FirebaseAuth.Auth {
         : getReactNativePersistence
           ? getReactNativePersistence(AsyncStorage)
           : FirebaseAuth.inMemoryPersistence,
+      // initializeAuth (unlike getAuth) leaves this out — "Continue with Google" popups need it on web
+      ...(Platform.OS === 'web' ? { popupRedirectResolver: FirebaseAuth.browserPopupRedirectResolver } : {}),
     });
   } catch {
     // Already initialized (fast refresh / background task re-import)
@@ -44,7 +47,10 @@ function createAuth(): FirebaseAuth.Auth {
 }
 
 export const auth = createAuth();
+/** Realtime Database — the live ride (high-frequency positions) */
 export const db = getDatabase(app);
+/** Cloud Firestore — profiles, clubs, chat, forums, ride history */
+export const fs = getFirestore(app);
 
 /** Local demo / development: talk to the Firebase emulators (`npm run emulators`) instead of a real project. */
 const useEmulator = process.env.EXPO_PUBLIC_USE_EMULATOR === '1';
@@ -53,15 +59,14 @@ if (useEmulator) {
   try {
     FirebaseAuth.connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
     connectDatabaseEmulator(db, host, 9000);
+    connectFirestoreEmulator(fs, host, 8080);
   } catch {
     // Already connected (fast refresh)
   }
 }
 
-/** Resolves to the signed-in rider's uid, signing in anonymously the first time. */
-export async function ensureSignedIn(): Promise<string> {
+/** The signed-in rider's uid (waits for the saved session to load), or null when signed out. */
+export async function currentUid(): Promise<string | null> {
   await auth.authStateReady();
-  if (auth.currentUser) return auth.currentUser.uid;
-  const cred = await FirebaseAuth.signInAnonymously(auth);
-  return cred.user.uid;
+  return auth.currentUser?.uid ?? null;
 }
