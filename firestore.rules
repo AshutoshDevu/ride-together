@@ -27,6 +27,26 @@ service cloud.firestore {
         && (!('photoURL' in request.resource.data) || request.resource.data.photoURL == null
             || (request.resource.data.photoURL is string && request.resource.data.photoURL.size() <= 500));
       allow delete: if false;
+
+      // users/{uid}/rides/{rideId} — ride history, private to the rider
+      match /rides/{rideId} {
+        allow read, delete: if signedIn() && request.auth.uid == uid;
+        allow create: if signedIn()
+          && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly([
+               'code', 'name', 'startedAt', 'endedAt', 'durationS', 'movingS', 'distanceM', 'avgKmh', 'maxKmh',
+               'polyline', 'speeds', 'riders', 'wasLeader', 'destination', 'createdAt'])
+          && request.resource.data.code is string && request.resource.data.code.size() <= 12
+          && request.resource.data.name is string && request.resource.data.name.size() <= 60
+          && request.resource.data.startedAt is number && request.resource.data.endedAt is number
+          && request.resource.data.distanceM is number && request.resource.data.distanceM >= 0
+          && request.resource.data.polyline is string && request.resource.data.polyline.size() <= 100000
+          && request.resource.data.speeds is list && request.resource.data.speeds.size() <= 2000
+          && request.resource.data.riders is list && request.resource.data.riders.size() <= 50
+          && request.resource.data.wasLeader is bool;
+        // A finished ride is a record — no edits
+        allow update: if false;
+      }
     }
   }
 }

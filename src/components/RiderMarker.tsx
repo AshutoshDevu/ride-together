@@ -81,7 +81,8 @@ function RiderMarkerBase({ rider, freshness, displayAt, isLeader, isMe, showLabe
   return (
     <Marker
       coordinate={{ latitude: displayAt?.lat ?? loc.lat, longitude: displayAt?.lng ?? loc.lng }}
-      anchor={{ x: 0.5, y: showLabel ? 0.27 : 0.5 }}
+      // the disc's centre: 28 px down a ~74 px tall marker (disc box 56 + name pill)
+      anchor={{ x: 0.5, y: showLabel ? 0.38 : 0.5 }}
       tracksViewChanges={tracks}
       onPress={() => onPress(rider)}
       zIndex={status !== 'ok' ? 1000 : isLeader ? 500 : isMe ? 400 : 1}

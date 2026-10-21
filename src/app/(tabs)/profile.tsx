@@ -9,13 +9,14 @@ import { signOut } from '../../lib/auth';
 import { confirmAction, notify } from '../../lib/dialog';
 import { useSession } from '../../lib/session';
 import { stopTracking } from '../../lib/tracking';
-import { setActiveGroup } from '../../lib/storage';
+import { getActiveGroup, setActiveGroup } from '../../lib/storage';
+import { finalizeRide } from '../../lib/history';
 import { makeStyles, radius, useTheme } from '../../lib/theme';
 
 export default function ProfileScreen() {
   const { colors } = useTheme();
   const styles = useStyles();
-  const { user, profile, saveProfile } = useSession();
+  const { user, uid, profile, saveProfile } = useSession();
   const [displayName, setDisplayName] = useState('');
   const [bike, setBike] = useState('');
   const [city, setCity] = useState('');
@@ -53,6 +54,8 @@ export default function ProfileScreen() {
     });
     if (!ok) return;
     await stopTracking();
+    const active = await getActiveGroup();
+    if (active && uid) await finalizeRide(active, uid).catch(() => {});
     await setActiveGroup(null);
     await signOut();
   }

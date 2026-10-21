@@ -3,8 +3,11 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
 import { currentUid } from './firebase';
+import { distanceMeters } from './geo';
 import { publishLocation } from './groups';
 import { getActiveGroup, setActiveGroup } from './storage';
+import { appendTrackPoint } from './trackBuffer';
+import { finalizeRide } from './history';
 
 /**
  * Location sharing.
@@ -19,6 +22,22 @@ export const LOCATION_TASK = 'ride-together-location';
 
 const MIN_PUBLISH_INTERVAL_MS = 4000;
 let lastPublish = 0;
+let lastFix: { lat: number; lng: number; t: number } | null = null;
+
+/**
+ * GPS speed (m/s), or — for laptops and phones that don't report one — the speed since the last
+ * published position, so every rider's speed shows on the map.
+ */
+function speedOf(loc: Location.LocationObject, now: number): number | null {
+  const t = loc.timestamp || now;
+  const prev = lastFix;
+  lastFix = { lat: loc.coords.latitude, lng: loc.coords.longitude, t };
+  if (loc.coords.speed != null && loc.coords.speed >= 0) return loc.coords.speed;
+  if (!prev || t - prev.t < 2000 || t - prev.t > 60_000) return null;
+  const d = distanceMeters({ latitude: prev.lat, longitude: prev.lng }, { latitude: lastFix.lat, longitude: lastFix.lng });
+  const v = d / ((t - prev.t) / 1000);
+  return v > 70 ? null : v; // > 250 km/h = GPS jump
+}
 
 async function publish(loc: Location.LocationObject) {
   const now = Date.now();
@@ -36,11 +55,21 @@ async function publish(loc: Location.LocationObject) {
     battery = level >= 0 ? Math.round(level * 100) : null;
   } catch {}
 
+  const speed = speedOf(loc, now);
+
+  // My own track for ride history (stays on the phone until the ride ends)
+  appendTrackPoint(code, {
+    lat: loc.coords.latitude,
+    lng: loc.coords.longitude,
+    t: loc.timestamp || now,
+    s: speed,
+  }).catch(() => {});
+
   await publishLocation(code, uid, {
     lat: loc.coords.latitude,
     lng: loc.coords.longitude,
     heading: loc.coords.heading ?? null,
-    speed: loc.coords.speed ?? null,
+    speed,
     accuracy: loc.coords.accuracy ?? null,
     battery,
   });
@@ -49,8 +78,11 @@ async function publish(loc: Location.LocationObject) {
 /** Ride ended (or we were removed) → the rules reject our writes, so stop the GPS for good. */
 async function onPublishError(e: unknown) {
   if (String((e as any)?.code ?? (e as any)?.message ?? e).toUpperCase().includes('PERMISSION_DENIED')) {
+    const code = await getActiveGroup();
     await setActiveGroup(null);
     await stopTracking();
+    const uid = await currentUid();
+    if (code && uid) await finalizeRide(code, uid).catch(() => {}); // save it to my history
     return;
   }
   console.warn('[tracking] publish failed', e);

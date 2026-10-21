@@ -32,6 +32,7 @@ type MapViewProps = {
   onUserLocationChange?: (e: { nativeEvent: { coordinate?: LatLng & { heading?: number | null; speed?: number | null } } }) => void;
   /** Fired when the user starts dragging the map by hand */
   onPanDrag?: () => void;
+  onMapReady?: () => void;
   onRegionChangeComplete?: (r: Region) => void;
   /** Right-click on a laptop, long-press on a touch screen */
   onLongPress?: (e: { nativeEvent: { coordinate: LatLng } }) => void;
@@ -70,8 +71,11 @@ function loadGoogleMaps(): Promise<typeof google.maps> {
   return loading;
 }
 
-/** Positions an arbitrary DOM element on the map, centred on a coordinate's dot. */
-function createHtmlOverlay(el: HTMLElement, anchorX: number, anchorY: number) {
+/**
+ * Positions an arbitrary DOM element on the map. `anchor` is the point of the element (0–1 of its
+ * width / height, like react-native-maps' Marker anchor) that sits on the coordinate.
+ */
+function createHtmlOverlay(el: HTMLElement, anchor: { x: number; y: number }) {
   class HtmlOverlay extends google.maps.OverlayView {
     pos: google.maps.LatLng | null = null;
     onAdd() {
@@ -82,8 +86,8 @@ function createHtmlOverlay(el: HTMLElement, anchorX: number, anchorY: number) {
     draw() {
       const p = this.pos && this.getProjection()?.fromLatLngToDivPixel(this.pos);
       if (!p) return;
-      el.style.left = `${p.x - anchorX}px`;
-      el.style.top = `${p.y - anchorY}px`;
+      el.style.left = `${p.x - el.offsetWidth * anchor.x}px`;
+      el.style.top = `${p.y - el.offsetHeight * anchor.y}px`;
     }
     onRemove() {
       el.remove();
@@ -128,14 +132,15 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     onPanDrag,
     mapPadding,
     customMapStyle,
+    onMapReady,
   },
   ref,
 ) {
   const el = useRef<HTMLDivElement | null>(null);
   const [map, setMap] = useState<google.maps.Map | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
-  const cbs = useRef({ onUserLocationChange, onRegionChangeComplete, onLongPress, onPanDrag });
-  cbs.current = { onUserLocationChange, onRegionChangeComplete, onLongPress, onPanDrag };
+  const cbs = useRef({ onUserLocationChange, onRegionChangeComplete, onLongPress, onPanDrag, onMapReady });
+  cbs.current = { onUserLocationChange, onRegionChangeComplete, onLongPress, onPanDrag, onMapReady };
   const pad = mapPadding ?? { top: 0, right: 0, bottom: 0, left: 0 };
 
   useEffect(() => {
@@ -171,6 +176,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           if (r) cbs.current.onRegionChangeComplete?.(r);
         });
         setMap(m);
+        google.maps.event.addListenerOnce(m, 'idle', () => cbs.current.onMapReady?.());
       })
       .catch((e) => setFailed(e.message));
     return () => {
@@ -275,17 +281,24 @@ type MarkerProps = {
 } & Record<string, any>;
 
 /** Renders the React children (the custom rider marker) as an HTML overlay on the map. */
-export function Marker({ coordinate, children, onPress, zIndex = 0 }: MarkerProps) {
+export function Marker({ coordinate, children, onPress, zIndex = 0, anchor = { x: 0.5, y: 0.5 } }: MarkerProps) {
   const map = useContext(MapContext);
   const holder = useMemo(() => document.createElement('div'), []);
   const overlay = useRef<ReturnType<typeof createHtmlOverlay> | null>(null);
+  const anchorRef = useRef({ ...anchor }); // own copy — updated in place, read by draw()
+  anchorRef.current.x = anchor.x;
+  anchorRef.current.y = anchor.y;
+  // The marker's size is only known once React has rendered into it — re-place after every render
+  useEffect(() => {
+    const id = requestAnimationFrame(() => overlay.current?.draw());
+    return () => cancelAnimationFrame(id);
+  });
   const press = useRef(onPress);
   press.current = onPress;
 
   useEffect(() => {
     if (!map) return;
-    // Rider marker is 90px wide with a 30px dot on top → anchor on the dot's centre
-    const o = createHtmlOverlay(holder, 45, 15);
+    const o = createHtmlOverlay(holder, anchorRef.current);
     o.setPosition(coordinate.latitude, coordinate.longitude);
     o.setMap(map);
     holder.style.cursor = 'pointer';

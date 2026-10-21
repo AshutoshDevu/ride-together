@@ -14,6 +14,7 @@ import { freshnessOf, RiderMarker } from '../../components/RiderMarker';
 import { Button } from '../../components/ui';
 import { playSignalLost } from '../../lib/alerts';
 import { declutter } from '../../lib/declutter';
+import { finalizeRide, type RideRecord } from '../../lib/history';
 import { confirmAction, notify } from '../../lib/dialog';
 import { db } from '../../lib/firebase';
 import { distanceMeters, formatDistance, type LatLng } from '../../lib/geo';
@@ -162,15 +163,22 @@ export default function GroupMap() {
     };
   }, [keepAwake, navActive]);
 
-  // --- leader ended the ride → stop sharing everywhere ---
+  // --- leader ended the ride → stop sharing everywhere, save it to my history ---
   const ended = !!meta?.endedAt;
+  const [saved, setSaved] = useState<RideRecord | null | 'saving'>(null);
   useEffect(() => {
     if (!ended) return;
     stopTracking();
     setActiveGroup(null);
     setSharing('paused');
     setKeepAwake(false);
-  }, [ended]);
+    if (uid) {
+      setSaved('saving');
+      finalizeRide(code, uid)
+        .then(setSaved)
+        .catch(() => setSaved(null));
+    }
+  }, [ended, uid, code]);
 
   // --- derived data ---
   const me = riders.find((r) => r.uid === uid);
@@ -436,6 +444,8 @@ export default function GroupMap() {
     });
     if (!ok) return;
     await stopTracking();
+    // Save to history before leaving — the rider list is only readable while I'm a member
+    if (uid) await finalizeRide(code, uid).catch(() => {});
     if (uid) await leaveGroup(code, uid).catch(() => {});
     await setActiveGroup(null);
     router.replace('/');
@@ -470,6 +480,28 @@ export default function GroupMap() {
         <Text style={styles.endedText}>
           {isLeader ? 'You ended' : 'The leader ended'} "{groupName}". Location sharing has stopped.
         </Text>
+        {saved === 'saving' && <ActivityIndicator color={colors.accent} />}
+        {saved && saved !== 'saving' && (
+          <View style={styles.summary}>
+            <Text style={styles.summaryKicker}>SAVED TO YOUR HISTORY</Text>
+            <View style={styles.summaryRow}>
+              <Stat label="Distance" value={formatDistance(saved.distanceM)} />
+              <Stat label="Moving" value={formatDuration(saved.movingS)} />
+              <Stat label="Avg" value={`${saved.avgKmh} km/h`} />
+              <Stat label="Top" value={`${saved.maxKmh} km/h`} />
+            </View>
+          </View>
+        )}
+        {saved && saved !== 'saving' && (
+          <Button
+            title="View ride"
+            variant="secondary"
+            onPress={() =>
+              router.replace({ pathname: '/history/[id]', params: { id: `${saved.code}-${saved.startedAt}` } })
+            }
+            style={{ alignSelf: 'stretch' }}
+          />
+        )}
         <Button title="Back home" onPress={() => router.replace('/')} style={{ alignSelf: 'stretch' }} />
       </View>
     );
@@ -791,6 +823,20 @@ const useStyles = makeStyles((colors) => ({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg, padding: 24, gap: 10 },
   endedTitle: { color: colors.text, fontSize: 26, fontWeight: '800' },
   endedText: { color: colors.textDim, fontSize: 15, textAlign: 'center', marginBottom: 12 },
+  summary: {
+    alignSelf: 'stretch',
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 16,
+    gap: 12,
+    marginBottom: 6,
+  },
+  summaryKicker: { color: colors.accent, fontWeight: '800', letterSpacing: 1, fontSize: 12, textAlign: 'center' },
+  summaryRow: { flexDirection: 'row' },
+  statValue: { color: colors.text, fontSize: 17, fontWeight: '800' },
+  statLabel: { color: colors.textDim, fontSize: 12, marginTop: 2 },
   destWrap: { alignItems: 'center', width: 140 },
   destDot: {
     width: 34,
@@ -895,3 +941,13 @@ const useStyles = makeStyles((colors) => ({
   code: { color: colors.text, fontSize: 44, fontWeight: '900', letterSpacing: 10, textAlign: 'center', marginVertical: 6 },
   link: { color: colors.textDim, textAlign: 'center', fontSize: 13, marginBottom: 6 },
 }));
+
+function Stat({ label, value }: { label: string; value: string }) {
+  const styles = useStyles();
+  return (
+    <View style={{ alignItems: 'center', flex: 1 }}>
+      <Text style={styles.statValue}>{value}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
+    </View>
+  );
+}

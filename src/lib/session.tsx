@@ -1,6 +1,7 @@
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { auth, isFirebaseConfigured } from './firebase';
+import { flushPendingRides } from './history';
 import { saveProfile, subscribeProfile, type Profile } from './profile';
 
 /**
@@ -46,6 +47,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const signedIn = !!user && !user.isAnonymous;
   const uid = user?.uid ?? null;
+
+  // Rides that ended while offline
+  useEffect(() => {
+    if (signedIn && uid) flushPendingRides(uid).catch(() => {});
+  }, [signedIn, uid]);
 
   useEffect(() => {
     setProfile(null);

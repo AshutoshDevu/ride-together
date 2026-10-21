@@ -131,6 +131,28 @@ export async function fetchNavRoute(from: LatLng, to: LatLng, heading?: number |
   };
 }
 
+/** Coordinates → Google's encoded polyline format (compact storage for ride tracks). */
+export function encodePolyline(points: LatLng[]): string {
+  let out = '';
+  let pLat = 0, pLng = 0;
+  const enc = (v: number) => {
+    let n = v < 0 ? ~(v << 1) : v << 1;
+    while (n >= 0x20) {
+      out += String.fromCharCode((0x20 | (n & 0x1f)) + 63);
+      n >>= 5;
+    }
+    out += String.fromCharCode(n + 63);
+  };
+  for (const p of points) {
+    const lat = Math.round(p.latitude * 1e5), lng = Math.round(p.longitude * 1e5);
+    enc(lat - pLat);
+    enc(lng - pLng);
+    pLat = lat;
+    pLng = lng;
+  }
+  return out;
+}
+
 /** Google's encoded polyline format → coordinates. */
 export function decodePolyline(encoded: string): LatLng[] {
   const out: LatLng[] = [];

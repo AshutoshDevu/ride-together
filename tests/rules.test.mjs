@@ -84,3 +84,31 @@ test('only the leader can end the ride', async () => {
   await assertFails(update(ref(google('kabir').database(), `groups/${code}`), { 'meta/endedAt': Date.now() }));
   await assertSucceeds(update(ref(google('lead').database(), `groups/${code}`), { 'meta/endedAt': Date.now() }));
 });
+
+// ---------- Firestore: users/{uid}/rides (history) ----------
+const ride = {
+  code: 'ABC234', name: 'Nandi Hills', startedAt: 1, endedAt: 2, durationS: 3600, movingS: 3000,
+  distanceM: 52000, avgKmh: 62, maxKmh: 98, polyline: 'abc', speeds: [40, 50], riders: ['Ashu', 'Meera'],
+  wasLeader: true, destination: 'Nandi Hills',
+};
+
+test('a rider can save and read their own ride history', async () => {
+  const fs = google('ashu').firestore();
+  await assertSucceeds(setDoc(doc(fs, 'users/ashu/rides/r1'), ride));
+  await assertSucceeds(getDoc(doc(fs, 'users/ashu/rides/r1')));
+  await assertSucceeds(deleteDoc(doc(fs, 'users/ashu/rides/r1')));
+});
+
+test("ride history is private — others can't read or write it", async () => {
+  await env.withSecurityRulesDisabled((c) => setDoc(doc(c.firestore(), 'users/ashu/rides/r1'), ride));
+  await assertFails(getDoc(doc(google('meera').firestore(), 'users/ashu/rides/r1')));
+  await assertFails(setDoc(doc(google('meera').firestore(), 'users/ashu/rides/r2'), ride));
+});
+
+test('saved rides cannot be edited and fields are checked', async () => {
+  const fs = google('ashu').firestore();
+  await env.withSecurityRulesDisabled((c) => setDoc(doc(c.firestore(), 'users/ashu/rides/r1'), ride));
+  await assertFails(setDoc(doc(fs, 'users/ashu/rides/r1'), { ...ride, distanceM: 999999 }));
+  await assertFails(setDoc(doc(fs, 'users/ashu/rides/r3'), { ...ride, hacked: true }));
+  await assertFails(setDoc(doc(fs, 'users/ashu/rides/r4'), { ...ride, speeds: new Array(2001).fill(1) }));
+});

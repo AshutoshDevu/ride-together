@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import { useTheme } from '../../lib/theme';
 
-/** Main tabs. Clubs, Community and History arrive with their phases. */
+/** Main tabs. Clubs and Community arrive with their phases. */
 export default function TabsLayout() {
   const { colors } = useTheme();
   return (
@@ -21,6 +21,13 @@ export default function TabsLayout() {
         options={{
           title: 'Ride',
           tabBarIcon: ({ color, size }) => <Ionicons name="bicycle" color={color} size={size + 2} />,
+        }}
+      />
+      <Tabs.Screen
+        name="history"
+        options={{
+          title: 'History',
+          tabBarIcon: ({ color, size }) => <Ionicons name="time" color={color} size={size + 2} />,
         }}
       />
       <Tabs.Screen
