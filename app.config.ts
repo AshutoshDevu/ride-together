@@ -86,7 +86,9 @@ const config: ExpoConfig = {
   },
   experiments: {
     typedRoutes: false,
-    baseUrl: '/app',
+    // Only the deployed website lives under /app (npm run build:web sets this). The dev server
+    // stays at the root — expo-router doesn't strip the base URL in development.
+    baseUrl: process.env.EXPO_WEB_BASE_URL || undefined,
   },
   owner: 'ashu260402',
   extra: {

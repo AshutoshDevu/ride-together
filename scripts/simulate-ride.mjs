@@ -130,7 +130,8 @@ async function main() {
     });
   }
   console.log(`${riders.length} riders on the road. Join in the app with code ${code}`);
-  console.log(`  or open http://localhost:8081/app/join/${code}\nCtrl+C to stop.\n`);
+  console.log(`  or open http://localhost:8081/join/${code}  (npm run web)`);
+  console.log(`       or http://localhost:5050/app/join/${code}  (built site on the hosting emulator)\nCtrl+C to stop.\n`);
 
   // Follow the leader's shared route (real roads) whenever one is set
   onValue(ref(riders[0].db, `groups/${code}/destination`), (snap) => {

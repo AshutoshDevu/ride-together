@@ -65,12 +65,15 @@ npm install
 #   EXPO_PUBLIC_FIREBASE_API_KEY=demo-key
 #   EXPO_PUBLIC_FIREBASE_DATABASE_URL=http://127.0.0.1:9000?ns=demo-ridetogether-default-rtdb
 #   EXPO_PUBLIC_FIREBASE_PROJECT_ID=demo-ridetogether
-npm run emulators   # terminal 1 — Firebase Auth + Realtime Database emulators
-npm run web         # terminal 2 — dev server, http://localhost:8081
+npm run emulators   # terminal 1 — Firebase Auth + Realtime Database (+ hosting on :5050) emulators
+npm run web         # terminal 2 — dev server at http://localhost:8081 (the root, not /app)
 npm run simulate    # terminal 3 — 6 fake riders on a Bangalore → Nandi Hills route (prints a join link)
+                    #   pass a ride code to join your own ride: npm run simulate -- K7QM2X
+                    #   once the leader sets a destination they ride that real route
 ```
 
-Web version for laptops: `npm run deploy:web` exports the app to `hosting/public/app` (using `.env.production`)
+Web version for laptops: `npm run deploy:web` exports the app to `hosting/public/app` under the `/app`
+base URL (`EXPO_WEB_BASE_URL`, only set for this build) using `.env.production`,
 and deploys it to <https://ridetogether-ashu.web.app/app/>. Invite links opened on a laptop go straight there;
 on phones the invite page also offers *Continue in browser*.
 

@@ -42,7 +42,7 @@
     "web": "expo start --web",
     "emulators": "firebase emulators:start --only auth,database,hosting --project demo-ridetogether",
     "simulate": "node scripts/simulate-ride.mjs",
-    "build:web": "expo export --platform web --output-dir hosting/public/app --clear",
+    "build:web": "EXPO_WEB_BASE_URL=/app expo export --platform web --output-dir hosting/public/app --clear",
     "deploy:web": "npm run build:web && firebase deploy --only hosting"
   },
   "private": true
