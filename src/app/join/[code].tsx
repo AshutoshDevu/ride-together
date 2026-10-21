@@ -1,18 +1,20 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NameField } from '../../components/NameField';
 import { Button } from '../../components/ui';
 import { getGroupMeta, isMember, joinGroup, normalizeCode, type GroupMeta } from '../../lib/groups';
 import { notify } from '../../lib/dialog';
 import { useSession } from '../../lib/session';
-import { colors, radius } from '../../lib/theme';
+import { makeStyles, radius, useTheme } from '../../lib/theme';
 
 /**
  * Opened from the WhatsApp invite: https://<host>/join/CODE or ridetogether://join/CODE
  */
 export default function JoinScreen() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const params = useLocalSearchParams<{ code: string }>();
   const code = normalizeCode(String(params.code ?? ''));
   const { ready, uid, name, saveName, error } = useSession();
@@ -82,11 +84,11 @@ export default function JoinScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
   container: { flex: 1, padding: 20, justifyContent: 'center', width: '100%', maxWidth: 560, alignSelf: 'center' },
   card: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: 22, gap: 14, borderWidth: 1, borderColor: colors.border },
   kicker: { color: colors.accent, fontWeight: '800', letterSpacing: 1, fontSize: 12 },
   title: { color: colors.text, fontSize: 28, fontWeight: '800' },
   dim: { color: colors.textDim, fontSize: 14 },
-});
+}));

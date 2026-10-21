@@ -2,15 +2,18 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { router, useLocalSearchParams } from 'expo-router';
 import { onValue, ref } from 'firebase/database';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Modal, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DestinationPicker } from '../../components/DestinationPicker';
+import { Glass } from '../../components/Glass';
 import { NavGroupStrip, type GroupStripItem } from '../../components/NavGroupStrip';
 import { NavBanner, NavFooter } from '../../components/NavigationHUD';
 import { RiderList, type RiderRow } from '../../components/RiderList';
-import { RiderMarker } from '../../components/RiderMarker';
+import { freshnessOf, RiderMarker } from '../../components/RiderMarker';
 import { Button } from '../../components/ui';
+import { playSignalLost } from '../../lib/alerts';
+import { declutter } from '../../lib/declutter';
 import { confirmAction, notify } from '../../lib/dialog';
 import { db } from '../../lib/firebase';
 import { distanceMeters, formatDistance, type LatLng } from '../../lib/geo';
@@ -34,11 +37,11 @@ import {
 import { useSession } from '../../lib/session';
 import { gapAlongRoute, getCurrentFix, navZoom, useTurnByTurn, type Fix } from '../../lib/navigation';
 import { computeTwoWheelerRoute, decodePolyline, formatDuration, type PlaceResult } from '../../lib/places';
-import { setActiveGroup } from '../../lib/storage';
-import { colors, radius } from '../../lib/theme';
+import { mapStyleFor } from '../../lib/mapStyles';
+import { getAlertsMuted, setActiveGroup, setAlertsMuted } from '../../lib/storage';
+import { makeStyles, radius, useTheme } from '../../lib/theme';
 import { backgroundHint, startTracking, stopTracking, type TrackingMode } from '../../lib/tracking';
 
-const STALE_AFTER_MS = 2 * 60 * 1000;
 const LABELS_MAX_DELTA = 0.6; // hide name tags when zoomed far out (big groups get cluttered)
 
 type Sharing = 'starting' | TrackingMode | 'paused' | 'error';
@@ -46,6 +49,8 @@ type Sharing = 'starting' | TrackingMode | 'paused' | 'error';
 const IS_WEB = Platform.OS === 'web';
 
 export default function GroupMap() {
+  const { colors, scheme } = useTheme();
+  const styles = useStyles();
   const params = useLocalSearchParams<{ code: string; invite?: string }>();
   const code = normalizeCode(String(params.code ?? ''));
   const { uid } = useSession();
@@ -63,6 +68,8 @@ export default function GroupMap() {
   const [navActive, setNavActive] = useState(false);
   const [follow, setFollow] = useState(true);
   const [voice, setVoice] = useState(true);
+  const [lostAlerts, setLostAlerts] = useState<{ uid: string; name: string }[]>([]);
+  const [muted, setMuted] = useState(false);
   const [sharing, setSharing] = useState<Sharing>('starting');
   const [showList, setShowList] = useState(false);
   const [showInvite, setShowInvite] = useState(params.invite === '1');
@@ -70,6 +77,8 @@ export default function GroupMap() {
   const [serverOffset, setServerOffset] = useState(0);
   const [tick, setTick] = useState(Date.now());
   const [labels, setLabels] = useState(true);
+  const [lngDelta, setLngDelta] = useState<number | null>(null);
+  const { width: screenW } = useWindowDimensions();
   const didFit = useRef(false);
 
   const now = tick + serverOffset;
@@ -99,7 +108,7 @@ export default function GroupMap() {
       );
     })();
     const offUnsub = onValue(ref(db, '.info/serverTimeOffset'), (s) => setServerOffset(s.val() ?? 0));
-    const t = setInterval(() => setTick(Date.now()), 10_000);
+    const t = setInterval(() => setTick(Date.now()), 5_000);
     return () => {
       cancelled = true;
       unsub?.();
@@ -198,7 +207,8 @@ export default function GroupMap() {
   const rows: RiderRow[] = useMemo(() => {
     const list = riders.map((r) => ({
       ...r,
-      stale: !!r.loc && now - r.loc.ts > STALE_AFTER_MS,
+      freshness: freshnessOf(r.loc?.ts, now),
+      stale: !!r.loc && freshnessOf(r.loc.ts, now) === 'lost',
       distance:
         myPos && r.loc ? distanceMeters(myPos, { latitude: r.loc.lat, longitude: r.loc.lng }) : null,
     }));
@@ -212,6 +222,34 @@ export default function GroupMap() {
 
   const located = rows.filter((r) => r.loc && !r.stale);
   const alerts = rows.filter((r) => r.loc && r.loc.status && r.loc.status !== 'ok');
+
+  // Fan out riders whose markers would overlap at this zoom (positions only change on screen)
+  const displayPos = useMemo(() => {
+    const pts = rows
+      .filter((r) => r.uid !== uid && r.loc)
+      .map((r) => ({ id: r.uid, lat: r.loc!.lat, lng: r.loc!.lng }));
+    return declutter(pts, lngDelta ? screenW / lngDelta : NaN);
+  }, [rows, uid, lngDelta, screenW]);
+
+  // --- signal lost: a rider's live light turns red → beep once + banner ---
+  useEffect(() => {
+    getAlertsMuted().then(setMuted);
+  }, []);
+  const prevFreshness = useRef(new Map<string, string>());
+  useEffect(() => {
+    const prev = prevFreshness.current;
+    for (const r of rows) {
+      if (r.uid === uid || !r.loc) continue;
+      const before = prev.get(r.uid);
+      prev.set(r.uid, r.freshness);
+      if (before && before !== 'lost' && r.freshness === 'lost') {
+        setLostAlerts((a) => [...a.filter((x) => x.uid !== r.uid), { uid: r.uid, name: r.name }]);
+        if (!muted) playSignalLost();
+      } else if (before === 'lost' && r.freshness !== 'lost') {
+        setLostAlerts((a) => a.filter((x) => x.uid !== r.uid)); // back online
+      }
+    }
+  }, [rows, uid, muted]);
 
   // Where everyone is relative to me along my route — most riders are off-screen when zoomed in
   const groupStrip: GroupStripItem[] = useMemo(() => {
@@ -419,7 +457,10 @@ export default function GroupMap() {
     }
   }
 
-  const onRegion = (r: Region) => setLabels(r.latitudeDelta < LABELS_MAX_DELTA || riders.length <= 15);
+  const onRegion = (r: Region) => {
+    setLabels(r.latitudeDelta < LABELS_MAX_DELTA || riders.length <= 15);
+    setLngDelta(r.longitudeDelta);
+  };
 
   if (ended) {
     return (
@@ -457,6 +498,7 @@ export default function GroupMap() {
         ref={mapRef}
         style={StyleSheet.absoluteFill}
         provider={PROVIDER_GOOGLE}
+        customMapStyle={mapStyleFor(scheme) as any}
         showsUserLocation
         showsMyLocationButton={false}
         showsCompass
@@ -504,7 +546,8 @@ export default function GroupMap() {
             <RiderMarker
               key={r.uid}
               rider={r}
-              stale={r.stale}
+              freshness={r.freshness}
+              displayAt={displayPos.get(r.uid)}
               isLeader={r.uid === meta?.createdBy}
               isMe={false}
               showLabel={labels}
@@ -526,7 +569,7 @@ export default function GroupMap() {
             onRetry={nav.retry}
           />
         ) : (
-        <View style={styles.topBar}>
+        <Glass style={styles.topBar}>
           <Pressable onPress={() => router.navigate('/')} hitSlop={10} style={styles.iconBtn}>
             <Text style={styles.iconText}>‹</Text>
           </Pressable>
@@ -540,7 +583,7 @@ export default function GroupMap() {
           <Pressable onPress={() => setShowInvite(true)} style={styles.inviteBtn}>
             <Text style={styles.inviteText}>+ Invite</Text>
           </Pressable>
-        </View>
+        </Glass>
         )}
 
         {navActive && (
@@ -552,6 +595,26 @@ export default function GroupMap() {
             }}
           />
         )}
+
+        {lostAlerts.map((a) => {
+          const r = rows.find((x) => x.uid === a.uid);
+          return (
+            <Pressable key={`lost-${a.uid}`} onPress={() => r && focusRider(r)} style={[styles.alert, styles.lostAlert]}>
+              <View style={styles.lostDot} />
+              <Text style={[styles.alertText, { color: colors.text, flex: 1 }]} numberOfLines={2}>
+                {a.name}'s signal lost{r?.distance != null ? ` · last seen ${formatDistance(r.distance)} away` : ''}
+              </Text>
+              {/* Stays until they're back online or you dismiss it */}
+              <Pressable
+                hitSlop={10}
+                onPress={() => setLostAlerts((l) => l.filter((x) => x.uid !== a.uid))}
+                accessibilityLabel="Dismiss"
+              >
+                <Text style={{ color: colors.textDim, fontSize: 18, fontWeight: '700' }}>✕</Text>
+              </Pressable>
+            </Pressable>
+          );
+        })}
 
         {alerts.map((r) => (
           <Pressable
@@ -602,6 +665,16 @@ export default function GroupMap() {
           <Text style={[styles.fabText, keepAwake && { color: colors.accentText }]}>☀︎</Text>
           <Text style={[styles.fabLabel, keepAwake && { color: colors.accentText }]}>Screen</Text>
         </Pressable>
+        <Pressable
+          style={styles.fab}
+          onPress={() => {
+            setMuted((m) => !m);
+            setAlertsMuted(!muted);
+          }}
+        >
+          <Text style={styles.fabText}>{muted ? '🔕' : '🔔'}</Text>
+          <Text style={styles.fabLabel}>{muted ? 'Muted' : 'Alerts'}</Text>
+        </Pressable>
       </View>
       )}
 
@@ -617,7 +690,7 @@ export default function GroupMap() {
           bottomInset={insets.bottom}
         />
       ) : (
-      <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
+      <Glass style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
         <Pressable onPress={() => setShowList((s) => !s)} style={styles.sheetHandle}>
           <View style={styles.grabber} />
           <Text style={styles.sheetTitle}>
@@ -674,7 +747,7 @@ export default function GroupMap() {
           </Pressable>
         </View>
         {sharing === 'foreground' && !IS_WEB && <Text style={styles.hint}>{backgroundHint}</Text>}
-      </View>
+      </Glass>
       )}
 
       <DestinationPicker
@@ -714,7 +787,7 @@ const shadow = {
   elevation: 8,
 };
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg, padding: 24, gap: 10 },
   endedTitle: { color: colors.text, fontSize: 26, fontWeight: '800' },
   endedText: { color: colors.textDim, fontSize: 15, textAlign: 'center', marginBottom: 12 },
@@ -749,16 +822,7 @@ const styles = StyleSheet.create({
   endBtn: { alignItems: 'center', paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.border },
   endText: { color: colors.danger, fontWeight: '800', fontSize: 15 },
   topWrap: { position: 'absolute', top: 0, left: 0, right: 0, paddingHorizontal: 12, gap: 8 },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    padding: 10,
-    marginTop: 6,
-    ...shadow,
-  },
+  topBar: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, marginTop: 6 },
   iconBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   iconText: { color: colors.text, fontSize: 30, marginTop: -4 },
   groupName: { color: colors.text, fontSize: 17, fontWeight: '800' },
@@ -766,30 +830,32 @@ const styles = StyleSheet.create({
   inviteBtn: { backgroundColor: colors.accent, paddingHorizontal: 12, paddingVertical: 9, borderRadius: radius.sm },
   inviteText: { color: colors.accentText, fontWeight: '800' },
   alert: { borderRadius: radius.md, padding: 12, ...shadow },
+  lostAlert: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: colors.surface,
+    borderWidth: 2,
+    borderColor: colors.danger,
+  },
+  lostDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#FF3B30', borderWidth: 2, borderColor: '#FFFFFF' },
   alertText: { color: '#0E0F12', fontWeight: '800', fontSize: 15 },
   fabs: { position: 'absolute', right: 12, gap: 10 },
   fab: {
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.glass,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.border,
     alignItems: 'center',
     justifyContent: 'center',
     ...shadow,
+    shadowOpacity: 0.2,
   },
   fabText: { color: colors.text, fontSize: 20, fontWeight: '700' },
   fabLabel: { color: colors.textDim, fontSize: 9, fontWeight: '700' },
-  sheet: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    paddingHorizontal: 16,
-    ...shadow,
-  },
+  sheet: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 16 },
   sheetHandle: { alignItems: 'center', paddingTop: 8, paddingBottom: 8, gap: 6 },
   grabber: { width: 40, height: 4, borderRadius: 2, backgroundColor: colors.border },
   sheetTitle: { color: colors.text, fontWeight: '700', fontSize: 15 },
@@ -828,4 +894,4 @@ const styles = StyleSheet.create({
   modalTitle: { color: colors.text, fontWeight: '800', fontSize: 24 },
   code: { color: colors.text, fontSize: 44, fontWeight: '900', letterSpacing: 10, textAlign: 'center', marginVertical: 6 },
   link: { color: colors.textDim, textAlign: 'center', fontSize: 13, marginBottom: 6 },
-});
+}));

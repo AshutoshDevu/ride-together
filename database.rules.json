@@ -19,7 +19,10 @@
           "$uid": {
             ".read": "auth != null && auth.uid === $uid",
             ".write": "auth != null && auth.uid === $uid && (!newData.exists() || !root.child('groups').child($code).child('meta').child('endedAt').exists()) && (root.child('groups').child($code).child('meta').exists() || newData.parent().parent().child('meta').exists())",
-            ".validate": "!newData.exists() || (newData.hasChildren(['name', 'color', 'joinedAt']) && newData.child('name').isString() && newData.child('name').val().length <= 40)"
+            ".validate": "!newData.exists() || (newData.hasChildren(['name', 'color', 'joinedAt']) && newData.child('name').isString() && newData.child('name').val().length <= 40)",
+            "colorIdx": {
+              ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 15"
+            }
           }
         },
         "locations": {
@@ -84,6 +87,13 @@
           },
           "$other": {
             ".validate": false
+          }
+        },
+        "colors": {
+          ".read": "auth != null",
+          "$idx": {
+            ".write": "auth != null && ((!data.exists() && newData.val() === auth.uid) || (data.val() === auth.uid && !newData.exists()))",
+            ".validate": "$idx.matches(/^([0-9]|1[0-5])$/) && newData.isString()"
           }
         }
       }

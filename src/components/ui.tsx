@@ -2,13 +2,12 @@ import type { ReactNode } from 'react';
 import {
   ActivityIndicator,
   Pressable,
-  StyleSheet,
   Text,
   TextInput,
   type TextInputProps,
   type ViewStyle,
 } from 'react-native';
-import { colors, radius } from '../lib/theme';
+import { makeStyles, radius, useTheme } from '../lib/theme';
 
 export function Button({
   title,
@@ -27,6 +26,8 @@ export function Button({
   icon?: ReactNode;
   style?: ViewStyle;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const bg =
     variant === 'primary' ? colors.accent
     : variant === 'danger' ? colors.danger
@@ -57,6 +58,8 @@ export function Button({
 }
 
 export function Input(props: TextInputProps) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <TextInput
       placeholderTextColor={colors.textDim}
@@ -66,7 +69,7 @@ export function Input(props: TextInputProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   btn: {
     minHeight: 54,
     borderRadius: radius.md,
@@ -87,4 +90,4 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     fontSize: 17,
   },
-});
+}));

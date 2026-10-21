@@ -16,7 +16,8 @@ const config: ExpoConfig = {
   version: '1.0.3',
   orientation: 'portrait',
   icon: './assets/icon.png',
-  userInterfaceStyle: 'dark',
+  // Follows the phone's light/dark setting (riders can override in the app)
+  userInterfaceStyle: 'automatic',
   ios: {
     bundleIdentifier: BUNDLE_ID,
     supportsTablet: false,

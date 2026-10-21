@@ -1,9 +1,9 @@
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { formatDistance } from '../lib/geo';
 import { maneuverIcon, type NavProgress, type NavStatus } from '../lib/navigation';
 import type { NavStep } from '../lib/places';
 import { formatDuration } from '../lib/places';
-import { colors, radius } from '../lib/theme';
+import { makeStyles, radius, useTheme } from '../lib/theme';
 
 const shadow = {
   shadowColor: '#000',
@@ -23,6 +23,8 @@ export function NavBanner(props: {
   destinationName: string;
   onRetry: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { status, error, progress, nextStep, thenStep, destinationName } = props;
 
   if (status === 'routing' || (status === 'navigating' && !progress)) {
@@ -92,6 +94,8 @@ export function NavFooter(props: {
   sosActive: boolean;
   bottomInset: number;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { progress } = props;
   const eta = progress ? new Date(Date.now() + progress.remainingS * 1000) : null;
   return (
@@ -117,7 +121,7 @@ export function NavFooter(props: {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   banner: { backgroundColor: '#0F5132', borderRadius: radius.lg, padding: 14, marginTop: 6, ...shadow },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   icon: { color: '#fff', fontSize: 44, fontWeight: '900', width: 52, textAlign: 'center' },
@@ -161,4 +165,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sosText: { color: '#fff', fontWeight: '900', fontSize: 15 },
-});
+}));

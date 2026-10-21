@@ -1,10 +1,10 @@
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { FlatList, Pressable, Text, View } from 'react-native';
 import { formatAgo, formatDistance, kmh } from '../lib/geo';
-import type { Rider } from '../lib/groups';
-import { colors } from '../lib/theme';
-import { initials } from './RiderMarker';
+import { onColor, type Rider } from '../lib/groups';
+import { makeStyles, useTheme } from '../lib/theme';
+import { initials, type Freshness } from './RiderMarker';
 
-export type RiderRow = Rider & { distance: number | null; stale: boolean };
+export type RiderRow = Rider & { distance: number | null; stale: boolean; freshness: Freshness };
 
 export function RiderList({
   rows,
@@ -19,6 +19,8 @@ export function RiderList({
   now: number;
   onSelect: (r: Rider) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   return (
     <FlatList
       data={rows}
@@ -31,7 +33,18 @@ export function RiderList({
         return (
           <Pressable style={styles.row} onPress={() => onSelect(r)} disabled={!r.loc}>
             <View style={[styles.avatar, { backgroundColor: r.stale || !r.loc ? colors.stale : r.color }]}>
-              <Text style={styles.avatarText}>{initials(r.name)}</Text>
+              <Text style={[styles.avatarText, { color: onColor(r.stale || !r.loc ? colors.stale : r.color) }]}>
+                {initials(r.name)}
+              </Text>
+              {/* Same live light as on the map marker */}
+              {r.loc && (
+                <View
+                  style={[
+                    styles.light,
+                    { backgroundColor: r.freshness === 'lost' ? '#FF3B30' : r.freshness === 'delayed' ? '#FF9F0A' : '#30D158' },
+                  ]}
+                />
+              )}
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.name} numberOfLines={1}>
@@ -60,14 +73,24 @@ export function RiderList({
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
   sep: { height: 1, backgroundColor: colors.border },
   avatar: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  avatarText: { color: '#0E0F12', fontWeight: '900', fontSize: 13 },
+  avatarText: { fontWeight: '900', fontSize: 13 },
+  light: {
+    position: 'absolute',
+    right: -2,
+    top: -2,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: colors.surface,
+  },
   name: { color: colors.text, fontSize: 16, fontWeight: '700' },
   meta: { color: colors.textDim, fontSize: 13, marginTop: 1 },
   dist: { color: colors.text, fontWeight: '800', fontSize: 15 },
   badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
   badgeText: { color: '#0E0F12', fontWeight: '900', fontSize: 11 },
-});
+}));

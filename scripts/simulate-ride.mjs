@@ -52,15 +52,23 @@ let ROUTE = [
   [13.3480, 77.7150], [13.3702, 77.6835],
 ];
 
+// Same palette + claiming as the app (src/lib/groups.ts) so simulated riders get unique colours
 const COLORS = [
-  '#FF6B00', '#00C2FF', '#7CFF4F', '#FF3D7F', '#FFD400', '#B46BFF',
-  '#00E0B0', '#FF8A65', '#4F8BFF', '#E040FB', '#C6FF00', '#FF5252',
+  '#E6194B', '#3CB44B', '#FFB000', '#7B2FF7', '#00B8D9', '#F032E6', '#8DB600', '#FF6F91',
+  '#008B8B', '#B5651D', '#5C6BC0', '#FF8C42', '#00A86B', '#C71585', '#6D8B74', '#D4A017',
 ];
-const colorForUid = (uid) => {
-  let h = 0;
-  for (let i = 0; i < uid.length; i++) h = (h * 31 + uid.charCodeAt(i)) >>> 0;
-  return COLORS[h % COLORS.length];
-};
+async function claimColor(db, code, uid) {
+  const taken = (await get(ref(db, `groups/${code}/colors`))).val() ?? {};
+  for (let i = 0; i < COLORS.length; i++) {
+    if (taken[i] === uid) return { color: COLORS[i], colorIdx: i };
+    if (taken[i]) continue;
+    try {
+      await set(ref(db, `groups/${code}/colors/${i}`), uid);
+      return { color: COLORS[i], colorIdx: i };
+    } catch {}
+  }
+  return { color: COLORS[0] };
+}
 
 const toRad = (d) => (d * Math.PI) / 180;
 function dist([aLat, aLng], [bLat, bLng]) {
@@ -144,11 +152,13 @@ async function main() {
   }
 
   for (const r of riders) {
+    r.claim = await claimColor(r.db, code, r.uid);
     await set(ref(r.db, `groups/${code}/members/${r.uid}`), {
-      name: r.name, color: colorForUid(r.uid), joinedAt: serverTimestamp(),
+      name: r.name, ...r.claim, joinedAt: serverTimestamp(),
     });
   }
   console.log(`${riders.length} riders on the road. Join in the app with code ${code}`);
+  console.log(`  colours: ${riders.map((r) => `${r.name.split(' ')[0]} ${r.claim.color}`).join(', ')}`);
   if (!USE_EMULATOR && WEB_BASE) console.log(`  invite link (phones & laptops): ${WEB_BASE}/join/${code}`);
   console.log(`  dev server (npm run web):       http://localhost:8081/join/${code}`);
   if (USE_EMULATOR) console.log(`  built site on hosting emulator: http://localhost:5050/app/join/${code}`);
@@ -197,7 +207,11 @@ async function main() {
         riders
           .filter((_, i) => !(created && i === 0))
           .map((r) =>
-            update(ref(r.db, `groups/${code}`), { [`members/${r.uid}`]: null, [`locations/${r.uid}`]: null }).catch(() => {}),
+            update(ref(r.db, `groups/${code}`), {
+              [`members/${r.uid}`]: null,
+              [`locations/${r.uid}`]: null,
+              ...(r.claim?.colorIdx != null ? { [`colors/${r.claim.colorIdx}`]: null } : {}),
+            }).catch(() => {}),
           ),
       );
       console.log(created ? `Ride ${code} ended and fake riders removed.` : `Fake riders left ride ${code}.`);

@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { LatLng } from '../lib/geo';
 import { searchPlaces, type PlaceResult } from '../lib/places';
-import { colors, radius } from '../lib/theme';
+import { makeStyles, radius, useTheme } from '../lib/theme';
 import { Button, Input } from './ui';
 
 type Props = {
@@ -15,6 +15,8 @@ type Props = {
 
 /** Leader's "where are we going?" search. Searches on submit only — Places is billed per request. */
 export function DestinationPicker({ visible, near, onPick, onClose }: Props) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<PlaceResult[] | null>(null);
@@ -74,7 +76,7 @@ export function DestinationPicker({ visible, near, onPick, onClose }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
   sheet: {
     backgroundColor: colors.surface,
@@ -94,4 +96,4 @@ const styles = StyleSheet.create({
   result: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
   resultName: { color: colors.text, fontWeight: '700', fontSize: 16 },
   resultAddr: { color: colors.textDim, fontSize: 13, marginTop: 2 },
-});
+}));

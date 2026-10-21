@@ -6,20 +6,22 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NameField } from '../components/NameField';
+import { ThemeToggle } from '../components/ThemeToggle';
 import { Button, Input } from '../components/ui';
 import { CODE_LENGTH, createGroup, getGroupMeta, isMember, joinGroup, normalizeCode } from '../lib/groups';
 import { notify } from '../lib/dialog';
 import { useSession } from '../lib/session';
 import { getActiveGroup, setActiveGroup } from '../lib/storage';
-import { colors, radius } from '../lib/theme';
+import { makeStyles, radius, useTheme } from '../lib/theme';
 
 export default function Home() {
+  const { colors } = useTheme();
+  const styles = useStyles();
   const { ready, error, uid, name, saveName } = useSession();
   const [draftName, setDraftName] = useState<string | null>(null);
   const [groupName, setGroupName] = useState('');
@@ -102,6 +104,9 @@ export default function Home() {
             <Text style={styles.logo}>🏍️</Text>
             <Text style={styles.title}>RideTogether</Text>
             <Text style={styles.subtitle}>One live map for the whole group. Nobody gets left behind.</Text>
+            <View style={{ marginTop: 12 }}>
+              <ThemeToggle />
+            </View>
           </View>
 
           {error && (
@@ -161,7 +166,7 @@ export default function Home() {
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
   // maxWidth keeps the form phone-sized on laptops (web)
   container: { padding: 20, gap: 18, paddingBottom: 40, width: '100%', maxWidth: 560, alignSelf: 'center' },
@@ -183,4 +188,4 @@ const styles = StyleSheet.create({
   resume: { backgroundColor: colors.accent, borderColor: colors.accent, gap: 4 },
   resumeLabel: { color: colors.accentText, fontSize: 12, fontWeight: '800', letterSpacing: 1 },
   resumeName: { color: colors.accentText, fontSize: 22, fontWeight: '800' },
-});
+}));

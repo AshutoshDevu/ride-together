@@ -36,6 +36,8 @@ type MapViewProps = {
   /** Right-click on a laptop, long-press on a touch screen */
   onLongPress?: (e: { nativeEvent: { coordinate: LatLng } }) => void;
   mapPadding?: EdgePadding;
+  /** Same JSON style array as react-native-maps' customMapStyle (light / dark theme) */
+  customMapStyle?: google.maps.MapTypeStyle[];
 } & Record<string, any>;
 
 export type MapViewHandle = {
@@ -46,21 +48,6 @@ export type MapViewHandle = {
 };
 
 const API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_WEB_KEY;
-
-// Matches the app's dark theme (styles only apply to maps without a cloud Map ID)
-const DARK_STYLE: google.maps.MapTypeStyle[] = [
-  { elementType: 'geometry', stylers: [{ color: '#1d2026' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#9aa0aa' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#0e0f12' }] },
-  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
-  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#2e323a' }] },
-  { featureType: 'road', elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
-  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#4a4134' }] },
-  { featureType: 'road.highway', elementType: 'labels.text.fill', stylers: [{ color: '#d8c3a5' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0b2233' }] },
-  { featureType: 'administrative', elementType: 'geometry', stylers: [{ color: '#3a3f48' }] },
-];
 
 let loading: Promise<typeof google.maps> | null = null;
 
@@ -109,6 +96,12 @@ function createHtmlOverlay(el: HTMLElement, anchorX: number, anchorY: number) {
   return new HtmlOverlay();
 }
 
+/** Land colour of a style (first `geometry` rule) — used behind tiles while they load */
+function baseColor(style?: google.maps.MapTypeStyle[]): string {
+  const rule = style?.find((r) => !r.featureType && r.elementType === 'geometry');
+  return (rule?.stylers?.[0] as { color?: string } | undefined)?.color ?? '#E5E3DF';
+}
+
 function regionOf(map: google.maps.Map): Region | null {
   const b = map.getBounds();
   const c = map.getCenter();
@@ -125,7 +118,17 @@ function regionOf(map: google.maps.Map): Region | null {
 const MapContext = createContext<google.maps.Map | null>(null);
 
 const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
-  { style, children, showsUserLocation, onUserLocationChange, onRegionChangeComplete, onLongPress, onPanDrag, mapPadding },
+  {
+    style,
+    children,
+    showsUserLocation,
+    onUserLocationChange,
+    onRegionChangeComplete,
+    onLongPress,
+    onPanDrag,
+    mapPadding,
+    customMapStyle,
+  },
   ref,
 ) {
   const el = useRef<HTMLDivElement | null>(null);
@@ -147,8 +150,8 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         const m = new google.maps.Map(el.current, {
           center: { lat: 12.97, lng: 77.59 },
           zoom: 12,
-          styles: DARK_STYLE,
-          backgroundColor: '#0E0F12',
+          styles: customMapStyle,
+          backgroundColor: baseColor(customMapStyle),
           disableDefaultUI: true,
           // Pinch / scroll-wheel zoom; the +/- control would sit under the app's bottom bar
           zoomControl: false,
@@ -174,6 +177,11 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       cancelled = true;
     };
   }, []);
+
+  // Theme switch (light ↔ dark) restyles the live map
+  useEffect(() => {
+    map?.setOptions({ styles: customMapStyle, backgroundColor: baseColor(customMapStyle) });
+  }, [map, customMapStyle]);
 
   // "You" = blue dot from the browser's geolocation
   useEffect(() => {
@@ -245,7 +253,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
   return (
     <View style={style}>
-      <div ref={el} style={{ position: 'absolute', inset: 0, background: '#0E0F12' }} />
+      <div ref={el} style={{ position: 'absolute', inset: 0, background: baseColor(customMapStyle) }} />
       {failed && (
         <View style={{ position: 'absolute', top: '45%', left: 0, right: 0, alignItems: 'center' }}>
           <Text style={{ color: '#9AA0AA' }}>{failed}</Text>

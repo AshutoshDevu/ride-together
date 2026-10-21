@@ -1,8 +1,9 @@
-import { StyleSheet, Text, View } from 'react-native';
-import { colors } from '../lib/theme';
+import { Text, View } from 'react-native';
+import { makeStyles, useTheme } from '../lib/theme';
 import { Input } from './ui';
 
 export function NameField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const styles = useStyles();
   return (
     <View style={{ gap: 8 }}>
       <Text style={styles.label}>Your rider name</Text>
@@ -18,6 +19,6 @@ export function NameField({ value, onChange }: { value: string; onChange: (v: st
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   label: { color: colors.textDim, fontSize: 13, fontWeight: '600', letterSpacing: 0.5, textTransform: 'uppercase' },
-});
+}));

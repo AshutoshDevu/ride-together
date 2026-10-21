@@ -1,7 +1,7 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { formatDistance } from '../lib/geo';
 import type { Rider } from '../lib/groups';
-import { colors, radius } from '../lib/theme';
+import { makeStyles, radius, useTheme } from '../lib/theme';
 
 export type GroupStripItem = {
   rider: Rider;
@@ -23,6 +23,8 @@ function label(i: GroupStripItem): string {
 
 /** "Where's everyone?" while navigating — the map is zoomed in, so most riders are off-screen. */
 export function NavGroupStrip({ items, onSelect }: { items: GroupStripItem[]; onSelect: (r: Rider) => void }) {
+  const { colors } = useTheme();
+  const styles = useStyles();
   if (!items.length) return null;
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
@@ -48,13 +50,13 @@ export function NavGroupStrip({ items, onSelect }: { items: GroupStripItem[]; on
   );
 }
 
-const styles = StyleSheet.create({
+const useStyles = makeStyles((colors) => ({
   row: { gap: 8, paddingVertical: 2 },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(23,25,30,0.94)',
+    backgroundColor: colors.glass,
     borderRadius: radius.lg,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -64,4 +66,4 @@ const styles = StyleSheet.create({
   dot: { width: 12, height: 12, borderRadius: 6, borderWidth: 1.5, borderColor: '#fff' },
   name: { color: colors.text, fontWeight: '800', fontSize: 13, maxWidth: 120 },
   gap: { color: colors.textDim, fontWeight: '700', fontSize: 12 },
-});
+}));

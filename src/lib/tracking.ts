@@ -95,7 +95,9 @@ export async function startTracking(groupName: string): Promise<TrackingMode> {
     await Location.startLocationUpdatesAsync(LOCATION_TASK, {
       accuracy: Location.Accuracy.High,
       timeInterval: 5000,
-      distanceInterval: 20,
+      // Report even when standing still (tea stop, signal) — otherwise the group's live light for
+      // this rider turns red and beeps "signal lost" while they're simply parked
+      distanceInterval: 0,
       activityType: Location.ActivityType.AutomotiveNavigation,
       pausesUpdatesAutomatically: false,
       showsBackgroundLocationIndicator: true,
@@ -131,8 +133,8 @@ async function startForegroundWatch() {
       (e) => console.warn('[tracking] browser location error', e.message),
       { enableHighAccuracy: true, maximumAge: 5000 },
     );
-    // A laptop barely moves, so the browser rarely reports — re-send so it doesn't show as "Signal lost"
-    const heartbeat = setInterval(() => last && publish(last).catch(onPublishError), 30_000);
+    // A laptop barely moves, so the browser rarely reports — re-send well inside the 20 s "delayed" window
+    const heartbeat = setInterval(() => last && publish(last).catch(onPublishError), 10_000);
     foregroundSub = {
       remove: () => {
         navigator.geolocation.clearWatch(id);
@@ -142,7 +144,7 @@ async function startForegroundWatch() {
     return;
   }
   foregroundSub = await Location.watchPositionAsync(
-    { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 20 },
+    { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 0 },
     (loc) => publish(loc).catch(onPublishError),
   );
 }

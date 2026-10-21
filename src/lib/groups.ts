@@ -16,7 +16,8 @@ import { db } from './firebase';
  * so frequent GPS updates from big groups stay cheap — Firestore would charge every update):
  *
  * groups/{CODE}/meta                 { name, createdBy, createdAt }
- * groups/{CODE}/members/{uid}        { name, color, joinedAt }
+ * groups/{CODE}/members/{uid}        { name, color, colorIdx?, joinedAt }
+ * groups/{CODE}/colors/{idx}          uid — who holds each rider colour (claimed once, so colours never repeat)
  * groups/{CODE}/locations/{uid}      { lat, lng, heading, speed, accuracy, battery, status, ts }
  * groups/{CODE}/destination          { lat, lng, name, address, polyline?, distanceM?, durationS?, setAt } (leader only)
  */
@@ -25,7 +26,7 @@ export type RiderStatus = 'ok' | 'stop' | 'sos';
 
 /** `endedAt` is set once by the leader; after that nobody can join or share a location. */
 export type GroupMeta = { name: string; createdBy: string; createdAt: number; endedAt?: number };
-export type Member = { name: string; color: string; joinedAt: number };
+export type Member = { name: string; color: string; colorIdx?: number; joinedAt: number };
 export type RiderLocation = {
   lat: number;
   lng: number;
@@ -56,15 +57,61 @@ export type Destination = {
 const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 export const CODE_LENGTH = 6;
 
+/**
+ * 16 rider colours spread around the colour wheel, each readable on both the light and dark map.
+ * Kept clear of the blue "you" dot and the orange/blue route lines.
+ */
 export const RIDER_COLORS = [
-  '#FF6B00', '#00C2FF', '#7CFF4F', '#FF3D7F', '#FFD400', '#B46BFF',
-  '#00E0B0', '#FF8A65', '#4F8BFF', '#E040FB', '#C6FF00', '#FF5252',
+  '#E6194B', // red
+  '#3CB44B', // green
+  '#FFB000', // amber
+  '#7B2FF7', // violet
+  '#00B8D9', // cyan
+  '#F032E6', // magenta
+  '#8DB600', // lime
+  '#FF6F91', // pink
+  '#008B8B', // teal
+  '#B5651D', // brown
+  '#5C6BC0', // indigo
+  '#FF8C42', // tangerine
+  '#00A86B', // jade
+  '#C71585', // plum
+  '#6D8B74', // sage
+  '#D4A017', // mustard
 ];
 
-export function colorForUid(uid: string): string {
+/** Readable initials colour on top of a rider colour. */
+export function onColor(hex: string): string {
+  const n = parseInt(hex.slice(1), 16);
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? '#111114' : '#FFFFFF';
+}
+
+/** Fallback when all 16 are taken (17+ riders) — colours start repeating. */
+function hashColorIdx(uid: string): number {
   let h = 0;
   for (let i = 0; i < uid.length; i++) h = (h * 31 + uid.charCodeAt(i)) >>> 0;
-  return RIDER_COLORS[h % RIDER_COLORS.length];
+  return h % RIDER_COLORS.length;
+}
+
+/**
+ * Claims the first free colour in this ride. The database only accepts a claim on an empty slot,
+ * so two riders joining at the same moment can't end up with the same colour.
+ */
+async function claimColor(code: string, uid: string): Promise<{ color: string; colorIdx?: number }> {
+  const taken: Record<string, string> = (await get(ref(db, `groups/${code}/colors`))).val() ?? {};
+  const mine = Object.entries(taken).find(([, u]) => u === uid);
+  if (mine) return { color: RIDER_COLORS[+mine[0]], colorIdx: +mine[0] };
+  for (let i = 0; i < RIDER_COLORS.length; i++) {
+    if (taken[i]) continue;
+    try {
+      await set(ref(db, `groups/${code}/colors/${i}`), uid);
+      return { color: RIDER_COLORS[i], colorIdx: i };
+    } catch {
+      // someone grabbed it a moment ago — try the next one
+    }
+  }
+  return { color: RIDER_COLORS[hashColorIdx(uid)] };
 }
 
 export function normalizeCode(input: string): string {
@@ -84,7 +131,9 @@ export async function createGroup(groupName: string, uid: string, riderName: str
     if (exists.exists()) continue;
     await update(ref(db, `groups/${code}`), {
       meta: { name: groupName.trim() || 'Group ride', createdBy: uid, createdAt: serverTimestamp() },
-      [`members/${uid}`]: { name: riderName, color: colorForUid(uid), joinedAt: serverTimestamp() },
+      // The ride is brand new, so the leader always gets the first colour
+      [`members/${uid}`]: { name: riderName, color: RIDER_COLORS[0], colorIdx: 0, joinedAt: serverTimestamp() },
+      'colors/0': uid,
     });
     return code;
   }
@@ -100,18 +149,23 @@ export async function joinGroup(code: string, uid: string, riderName: string): P
   const meta = await getGroupMeta(code);
   if (!meta) throw new Error(`No ride found with code ${code}. Check the code or ask for a new link.`);
   if (meta.endedAt) throw new Error(`The ride "${meta.name}" has already ended.`);
+  const { color, colorIdx } = await claimColor(code, uid);
   await set(ref(db, `groups/${code}/members/${uid}`), {
     name: riderName,
-    color: colorForUid(uid),
+    color,
+    ...(colorIdx != null ? { colorIdx } : {}),
     joinedAt: serverTimestamp(),
   });
   return meta;
 }
 
 export async function leaveGroup(code: string, uid: string) {
+  const me = (await get(ref(db, `groups/${code}/members/${uid}`))).val() as Member | null;
   await update(ref(db, `groups/${code}`), {
     [`members/${uid}`]: null,
     [`locations/${uid}`]: null,
+    // free my colour for the next rider
+    ...(me?.colorIdx != null ? { [`colors/${me.colorIdx}`]: null } : {}),
   });
 }
 
