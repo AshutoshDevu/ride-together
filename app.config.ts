@@ -13,7 +13,7 @@ const config: ExpoConfig = {
   name: 'RideTogether',
   slug: 'ride-together',
   scheme: 'ridetogether',
-  version: '1.0.3',
+  version: '1.1.0',
   orientation: 'portrait',
   icon: './assets/icon.png',
   // Follows the phone's light/dark setting (riders can override in the app)
