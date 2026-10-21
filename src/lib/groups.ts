@@ -22,7 +22,8 @@ import { db } from './firebase';
 
 export type RiderStatus = 'ok' | 'stop' | 'sos';
 
-export type GroupMeta = { name: string; createdBy: string; createdAt: number };
+/** `endedAt` is set once by the leader; after that nobody can join or share a location. */
+export type GroupMeta = { name: string; createdBy: string; createdAt: number; endedAt?: number };
 export type Member = { name: string; color: string; joinedAt: number };
 export type RiderLocation = {
   lat: number;
@@ -84,6 +85,7 @@ export async function getGroupMeta(code: string): Promise<GroupMeta | null> {
 export async function joinGroup(code: string, uid: string, riderName: string): Promise<GroupMeta> {
   const meta = await getGroupMeta(code);
   if (!meta) throw new Error(`No ride found with code ${code}. Check the code or ask for a new link.`);
+  if (meta.endedAt) throw new Error(`The ride "${meta.name}" has already ended.`);
   await set(ref(db, `groups/${code}/members/${uid}`), {
     name: riderName,
     color: colorForUid(uid),
@@ -96,6 +98,17 @@ export async function leaveGroup(code: string, uid: string) {
   await update(ref(db, `groups/${code}`), {
     [`members/${uid}`]: null,
     [`locations/${uid}`]: null,
+  });
+}
+
+/**
+ * Leader only (enforced by the database rules): ends the ride for everyone and wipes
+ * all last-known positions. Every rider's app sees `endedAt` and stops sharing.
+ */
+export async function endRide(code: string) {
+  await update(ref(db, `groups/${code}`), {
+    'meta/endedAt': serverTimestamp(),
+    locations: null,
   });
 }
 

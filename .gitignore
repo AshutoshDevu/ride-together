@@ -54,3 +54,6 @@ yarn-error.*
 
 # Local scratch
 _to_delete/
+
+# Web build output (npm run build:web)
+hosting/public/app/

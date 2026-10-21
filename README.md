@@ -65,9 +65,13 @@ npm install
 #   EXPO_PUBLIC_FIREBASE_DATABASE_URL=http://127.0.0.1:9000?ns=demo-ridetogether-default-rtdb
 #   EXPO_PUBLIC_FIREBASE_PROJECT_ID=demo-ridetogether
 npm run emulators   # terminal 1 — Firebase Auth + Realtime Database emulators
-npm run web         # terminal 2 — http://localhost:8081
+npm run web         # terminal 2 — dev server, http://localhost:8081
 npm run simulate    # terminal 3 — 6 fake riders on a Bangalore → Nandi Hills route (prints a join link)
 ```
+
+Web version for laptops: `npm run deploy:web` exports the app to `hosting/public/app` (using `.env.production`)
+and deploys it to <https://ridetogether-ashu.web.app/app/>. Invite links opened on a laptop go straight there;
+on phones the invite page also offers *Continue in browser*.
 
 Production builds don't read `.env` — their Firebase / Maps values live in EAS environment variables
 (`npx eas-cli env:list --environment preview`).

@@ -13,7 +13,7 @@ const config: ExpoConfig = {
   name: 'RideTogether',
   slug: 'ride-together',
   scheme: 'ridetogether',
-  version: '1.0.0',
+  version: '1.0.1',
   orientation: 'portrait',
   icon: './assets/icon.png',
   userInterfaceStyle: 'dark',
@@ -79,8 +79,14 @@ const config: ExpoConfig = {
       },
     ],
   ],
+  web: {
+    // Single-page app served from https://<invite host>/app (Firebase Hosting rewrites /app/** to it)
+    output: 'single',
+    bundler: 'metro',
+  },
   experiments: {
     typedRoutes: false,
+    baseUrl: '/app',
   },
   owner: 'ashu260402',
   extra: {

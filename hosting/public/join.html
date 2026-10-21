@@ -29,6 +29,7 @@
   <div class="code" id="code">······</div>
   <a class="btn primary" id="open" href="#">Open in the app</a>
   <a class="btn secondary" id="store" href="#">Get the app</a>
+  <a class="btn secondary" id="web" href="#">Continue in browser</a>
   <p>Already installed but the button doesn't work? Open RideTogether and enter the code above.</p>
 </div>
 <script>
@@ -55,6 +56,13 @@
 
   document.getElementById('open').href = openUrl;
   document.getElementById('store').href = isIOS ? APP_STORE_URL : PLAY_URL;
+
+  // Laptop / desktop (or no app): the full app also runs in the browser at /app
+  var webUrl = '/app/join/' + code;
+  document.getElementById('web').href = webUrl;
+  if (code && !isAndroid && !isIOS) {
+    location.replace(webUrl);
+  }
 
   // Try to jump straight into the app (works when App Links / Universal Links aren't verified yet)
   if (code && (isAndroid || isIOS)) {

@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getApp, getApps, initializeApp } from 'firebase/app';
 import * as FirebaseAuth from 'firebase/auth';
 import { connectDatabaseEmulator, getDatabase } from 'firebase/database';
+import { Platform } from 'react-native';
 
 const firebaseConfig = {
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
@@ -29,9 +30,12 @@ const getReactNativePersistence = (FirebaseAuth as any).getReactNativePersistenc
 function createAuth(): FirebaseAuth.Auth {
   try {
     return FirebaseAuth.initializeAuth(app, {
-      persistence: getReactNativePersistence
-        ? getReactNativePersistence(AsyncStorage)
-        : FirebaseAuth.inMemoryPersistence,
+      // Browser: keep the rider in localStorage so a page refresh doesn't make them a new rider
+      persistence: Platform.OS === 'web'
+        ? FirebaseAuth.browserLocalPersistence
+        : getReactNativePersistence
+          ? getReactNativePersistence(AsyncStorage)
+          : FirebaseAuth.inMemoryPersistence,
     });
   } catch {
     // Already initialized (fast refresh / background task re-import)

@@ -4,7 +4,7 @@ import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
 import { ensureSignedIn } from './firebase';
 import { publishLocation } from './groups';
-import { getActiveGroup } from './storage';
+import { getActiveGroup, setActiveGroup } from './storage';
 
 /**
  * Location sharing.
@@ -45,6 +45,16 @@ async function publish(loc: Location.LocationObject) {
   });
 }
 
+/** Ride ended (or we were removed) → the rules reject our writes, so stop the GPS for good. */
+async function onPublishError(e: unknown) {
+  if (String((e as any)?.code ?? (e as any)?.message ?? e).toUpperCase().includes('PERMISSION_DENIED')) {
+    await setActiveGroup(null);
+    await stopTracking();
+    return;
+  }
+  console.warn('[tracking] publish failed', e);
+}
+
 // Must be defined at module top-level; this file is imported from the root layout.
 TaskManager.defineTask<{ locations: Location.LocationObject[] }>(LOCATION_TASK, async ({ data, error }) => {
   if (error || !data?.locations?.length) return;
@@ -52,7 +62,7 @@ TaskManager.defineTask<{ locations: Location.LocationObject[] }>(LOCATION_TASK, 
   try {
     await publish(latest);
   } catch (e) {
-    console.warn('[tracking] publish failed', e);
+    await onPublishError(e);
   }
 });
 
@@ -107,7 +117,7 @@ async function startForegroundWatch() {
   stopForegroundWatch();
   foregroundSub = await Location.watchPositionAsync(
     { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 20 },
-    (loc) => publish(loc).catch((e) => console.warn('[tracking] publish failed', e)),
+    (loc) => publish(loc).catch(onPublishError),
   );
 }
 

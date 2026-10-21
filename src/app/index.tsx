@@ -2,7 +2,6 @@ import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -15,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { NameField } from '../components/NameField';
 import { Button, Input } from '../components/ui';
 import { CODE_LENGTH, createGroup, getGroupMeta, isMember, joinGroup, normalizeCode } from '../lib/groups';
+import { notify } from '../lib/dialog';
 import { useSession } from '../lib/session';
 import { getActiveGroup, setActiveGroup } from '../lib/storage';
 import { colors, radius } from '../lib/theme';
@@ -36,7 +36,7 @@ export default function Home() {
         const active = await getActiveGroup();
         if (!active) return setResume(null);
         const [meta, member] = await Promise.all([getGroupMeta(active), isMember(active, uid)]);
-        if (meta && member) setResume({ code: active, name: meta.name });
+        if (meta && !meta.endedAt && member) setResume({ code: active, name: meta.name });
         else {
           await setActiveGroup(null);
           setResume(null);
@@ -47,7 +47,7 @@ export default function Home() {
 
   async function withName(): Promise<string | null> {
     if (riderName.length < 2) {
-      Alert.alert('Add your name', 'Riders will see this name next to your marker on the map.');
+      notify('Add your name', 'Riders will see this name next to your marker on the map.');
       return null;
     }
     if (riderName !== name) await saveName(riderName);
@@ -63,7 +63,7 @@ export default function Home() {
       const c = await createGroup(groupName, uid, n);
       router.push({ pathname: '/group/[code]', params: { code: c, invite: '1' } });
     } catch (e: any) {
-      Alert.alert('Could not create ride', e?.message ?? String(e));
+      notify('Could not create ride', e?.message ?? String(e));
     } finally {
       setBusy(null);
     }
@@ -74,13 +74,13 @@ export default function Home() {
     const n = await withName();
     if (!n) return;
     const c = normalizeCode(code);
-    if (c.length !== CODE_LENGTH) return Alert.alert('Invalid code', `Ride codes have ${CODE_LENGTH} characters.`);
+    if (c.length !== CODE_LENGTH) return notify('Invalid code', `Ride codes have ${CODE_LENGTH} characters.`);
     setBusy('join');
     try {
       await joinGroup(c, uid, n);
       router.push({ pathname: '/group/[code]', params: { code: c } });
     } catch (e: any) {
-      Alert.alert('Could not join', e?.message ?? String(e));
+      notify('Could not join', e?.message ?? String(e));
     } finally {
       setBusy(null);
     }
@@ -163,7 +163,8 @@ export default function Home() {
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
-  container: { padding: 20, gap: 18, paddingBottom: 40 },
+  // maxWidth keeps the form phone-sized on laptops (web)
+  container: { padding: 20, gap: 18, paddingBottom: 40, width: '100%', maxWidth: 560, alignSelf: 'center' },
   hero: { alignItems: 'center', gap: 6, marginTop: 12, marginBottom: 6 },
   logo: { fontSize: 52 },
   title: { color: colors.text, fontSize: 32, fontWeight: '800', letterSpacing: -0.5 },

@@ -10,6 +10,10 @@
     ],
     "rewrites": [
       {
+        "source": "/app/**",
+        "destination": "/app/index.html"
+      },
+      {
         "source": "/join/**",
         "destination": "/join.html"
       }
@@ -45,6 +49,9 @@
     "ui": {
       "enabled": false
     },
-    "singleProjectMode": true
+    "singleProjectMode": true,
+    "hosting": {
+      "port": 5050
+    }
   }
 }

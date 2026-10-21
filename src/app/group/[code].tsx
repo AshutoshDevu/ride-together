@@ -2,15 +2,17 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { router, useLocalSearchParams } from 'expo-router';
 import { onValue, ref } from 'firebase/database';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { PROVIDER_GOOGLE, type Region } from 'react-native-maps';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RiderList, type RiderRow } from '../../components/RiderList';
 import { RiderMarker } from '../../components/RiderMarker';
 import { Button } from '../../components/ui';
+import { confirmAction, notify } from '../../lib/dialog';
 import { db } from '../../lib/firebase';
 import { distanceMeters, formatDistance, type LatLng } from '../../lib/geo';
 import {
+  endRide,
   inviteLink,
   isMember,
   leaveGroup,
@@ -33,6 +35,9 @@ const LABELS_MAX_DELTA = 0.6; // hide name tags when zoomed far out (big groups 
 
 type Sharing = 'starting' | TrackingMode | 'paused' | 'error';
 
+// On a laptop/browser you usually just want to watch the group, so sharing starts off
+const IS_WEB = Platform.OS === 'web';
+
 export default function GroupMap() {
   const params = useLocalSearchParams<{ code: string; invite?: string }>();
   const code = normalizeCode(String(params.code ?? ''));
@@ -44,7 +49,7 @@ export default function GroupMap() {
   const [riders, setRiders] = useState<Rider[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [myPos, setMyPos] = useState<LatLng | null>(null);
-  const [sharing, setSharing] = useState<Sharing>('starting');
+  const [sharing, setSharing] = useState<Sharing>(IS_WEB ? 'paused' : 'starting');
   const [showList, setShowList] = useState(false);
   const [showInvite, setShowInvite] = useState(params.invite === '1');
   const [keepAwake, setKeepAwake] = useState(false);
@@ -75,7 +80,7 @@ export default function GroupMap() {
           setRiders(riders);
           setLoaded(true);
         },
-        (e) => Alert.alert('Connection problem', e.message),
+        (e) => notify('Connection problem', e.message),
       );
     })();
     const offUnsub = onValue(ref(db, '.info/serverTimeOffset'), (s) => setServerOffset(s.val() ?? 0));
@@ -105,6 +110,7 @@ export default function GroupMap() {
       setSharing(mode);
     } catch (e: any) {
       setSharing('error');
+      if (IS_WEB) return notify('Location needed', 'Allow location for this site in your browser to share your position.');
       Alert.alert('Location needed', e?.message ?? String(e), [
         { text: 'Open settings', onPress: () => Linking.openSettings() },
         { text: 'OK' },
@@ -114,7 +120,7 @@ export default function GroupMap() {
 
   const startedOnce = useRef(false);
   useEffect(() => {
-    if (meta && !startedOnce.current) {
+    if (meta && !meta.endedAt && !startedOnce.current && !IS_WEB) {
       startedOnce.current = true;
       start();
     }
@@ -130,6 +136,16 @@ export default function GroupMap() {
         .catch(() => {});
     };
   }, [keepAwake]);
+
+  // --- leader ended the ride → stop sharing everywhere ---
+  const ended = !!meta?.endedAt;
+  useEffect(() => {
+    if (!ended) return;
+    stopTracking();
+    setActiveGroup(null);
+    setSharing('paused');
+    setKeepAwake(false);
+  }, [ended]);
 
   // --- derived data ---
   const me = riders.find((r) => r.uid === uid);
@@ -215,35 +231,67 @@ export default function GroupMap() {
     try {
       await setRiderStatus(code, uid, s);
     } catch (e: any) {
-      Alert.alert('Could not update', e?.message ?? String(e));
+      notify('Could not update', e?.message ?? String(e));
     }
   }
 
-  function confirmSos() {
+  async function confirmSos() {
     if (myStatus === 'sos') return setStatus('ok');
-    Alert.alert('Send SOS?', 'Every rider in the group will see a red SOS marker at your location.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Send SOS', style: 'destructive', onPress: () => setStatus('sos') },
-    ]);
+    const ok = await confirmAction({
+      title: 'Send SOS?',
+      message: 'Every rider in the group will see a red SOS marker at your location.',
+      confirmText: 'Send SOS',
+      destructive: true,
+    });
+    if (ok) setStatus('sos');
   }
 
-  function confirmLeave() {
-    Alert.alert('Leave ride?', 'You will stop sharing your location and disappear from the group map.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Leave',
-        style: 'destructive',
-        onPress: async () => {
-          await stopTracking();
-          if (uid) await leaveGroup(code, uid).catch(() => {});
-          await setActiveGroup(null);
-          router.replace('/');
-        },
-      },
-    ]);
+  async function confirmLeave() {
+    const ok = await confirmAction({
+      title: 'Leave ride?',
+      message: 'You will stop sharing your location and disappear from the group map.',
+      confirmText: 'Leave',
+      destructive: true,
+    });
+    if (!ok) return;
+    await stopTracking();
+    if (uid) await leaveGroup(code, uid).catch(() => {});
+    await setActiveGroup(null);
+    router.replace('/');
+  }
+
+  async function confirmEnd() {
+    const ok = await confirmAction({
+      title: 'End ride for everyone?',
+      message: 'Location sharing stops on every rider\'s phone and nobody can join with this code any more.',
+      confirmText: 'End ride',
+      destructive: true,
+    });
+    if (!ok) return;
+    setShowInvite(false);
+    try {
+      await endRide(code);
+    } catch (e: any) {
+      notify('Could not end the ride', e?.message ?? String(e));
+    }
   }
 
   const onRegion = (r: Region) => setLabels(r.latitudeDelta < LABELS_MAX_DELTA || riders.length <= 15);
+
+  const isLeader = !!uid && uid === meta?.createdBy;
+
+  if (ended) {
+    return (
+      <View style={styles.center}>
+        <Text style={{ fontSize: 48 }}>🏁</Text>
+        <Text style={styles.endedTitle}>Ride ended</Text>
+        <Text style={styles.endedText}>
+          {isLeader ? 'You ended' : 'The leader ended'} "{groupName}". Location sharing has stopped.
+        </Text>
+        <Button title="Back home" onPress={() => router.replace('/')} style={{ alignSelf: 'stretch' }} />
+      </View>
+    );
+  }
 
   if (!loaded) {
     return (
@@ -258,7 +306,7 @@ export default function GroupMap() {
     sharing === 'background' ? 'Sharing · background'
     : sharing === 'foreground' ? 'Sharing · app open only'
     : sharing === 'starting' ? 'Starting GPS…'
-    : sharing === 'paused' ? 'Paused — tap to share'
+    : sharing === 'paused' ? (IS_WEB ? 'Watching — tap to share me' : 'Paused — tap to share')
     : 'Location off — tap to retry';
   const sharingOn = sharing === 'background' || sharing === 'foreground';
 
@@ -353,6 +401,11 @@ export default function GroupMap() {
         </Pressable>
 
         {showList && <RiderList rows={rows} me={uid} leaderUid={meta?.createdBy} now={now} onSelect={focusRider} />}
+        {showList && (
+          <Pressable onPress={isLeader ? confirmEnd : confirmLeave} style={styles.endBtn}>
+            <Text style={styles.endText}>{isLeader ? '🏁 End ride for everyone' : 'Leave ride'}</Text>
+          </Pressable>
+        )}
 
         <View style={styles.actions}>
           <Pressable
@@ -374,7 +427,7 @@ export default function GroupMap() {
             <Text style={[styles.statusText, { color: '#fff' }]}>{myStatus === 'sos' ? "I'm OK" : 'SOS'}</Text>
           </Pressable>
         </View>
-        {sharing === 'foreground' && <Text style={styles.hint}>{backgroundHint}</Text>}
+        {sharing === 'foreground' && !IS_WEB && <Text style={styles.hint}>{backgroundHint}</Text>}
       </View>
 
       {/* Invite modal */}
@@ -387,7 +440,11 @@ export default function GroupMap() {
             <Text style={styles.link} selectable>{inviteLink(code)}</Text>
             <Button title="Share on WhatsApp" onPress={() => shareToWhatsApp(code, groupName)} style={{ backgroundColor: '#25D366' }} />
             <Button title="More share options" variant="secondary" onPress={() => shareInvite(code, groupName)} />
-            <Button title="Leave ride" variant="ghost" onPress={() => { setShowInvite(false); confirmLeave(); }} />
+            {isLeader ? (
+              <Button title="End ride for everyone" variant="danger" onPress={confirmEnd} />
+            ) : (
+              <Button title="Leave ride" variant="ghost" onPress={() => { setShowInvite(false); confirmLeave(); }} />
+            )}
           </Pressable>
         </Pressable>
       </Modal>
@@ -404,7 +461,11 @@ const shadow = {
 };
 
 const styles = StyleSheet.create({
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.bg, padding: 24, gap: 10 },
+  endedTitle: { color: colors.text, fontSize: 26, fontWeight: '800' },
+  endedText: { color: colors.textDim, fontSize: 15, textAlign: 'center', marginBottom: 12 },
+  endBtn: { alignItems: 'center', paddingVertical: 12, borderTopWidth: 1, borderTopColor: colors.border },
+  endText: { color: colors.danger, fontWeight: '800', fontSize: 15 },
   topWrap: { position: 'absolute', top: 0, left: 0, right: 0, paddingHorizontal: 12, gap: 8 },
   topBar: {
     flexDirection: 'row',

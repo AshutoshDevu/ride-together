@@ -109,7 +109,7 @@ async function main() {
     });
   }
   console.log(`${riders.length} riders on the road. Join in the app with code ${code}`);
-  console.log(`  or open http://localhost:8081/join/${code}\nCtrl+C to stop.\n`);
+  console.log(`  or open http://localhost:8081/app/join/${code}\nCtrl+C to stop.\n`);
 
   const startedAt = Date.now();
   const timer = setInterval(async () => {
