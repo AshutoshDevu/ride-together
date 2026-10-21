@@ -67,7 +67,8 @@ export async function startTracking(groupName: string): Promise<TrackingMode> {
   }
 
   let bgGranted = false;
-  try {
+  // Browsers have no background location → foreground watcher only
+  if (Platform.OS !== 'web') try {
     const bg = await Location.requestBackgroundPermissionsAsync();
     bgGranted = bg.status === 'granted';
   } catch {

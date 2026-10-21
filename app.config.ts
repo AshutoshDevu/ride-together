@@ -4,8 +4,8 @@ import type { ExpoConfig } from 'expo/config';
  * All secrets / per-environment values come from `.env` (see `.env.example`).
  * Expo loads `.env` automatically for both the app bundle and this config file.
  */
-const BUNDLE_ID = process.env.APP_BUNDLE_ID ?? 'com.ridetogether.app';
-const INVITE_HOST = (process.env.EXPO_PUBLIC_INVITE_BASE_URL ?? 'https://ride-together.web.app')
+const BUNDLE_ID = process.env.APP_BUNDLE_ID ?? 'com.ashutoshdevu.ridetogether';
+const INVITE_HOST = (process.env.EXPO_PUBLIC_INVITE_BASE_URL || 'https://ridetogether-ashu.web.app')
   .replace(/^https?:\/\//, '')
   .replace(/\/$/, '');
 
@@ -81,6 +81,10 @@ const config: ExpoConfig = {
   ],
   experiments: {
     typedRoutes: false,
+  },
+  owner: 'ashu260402',
+  extra: {
+    eas: { projectId: '3f6f2634-9b88-4dfe-a7c6-20d62497929e' },
   },
 };
 

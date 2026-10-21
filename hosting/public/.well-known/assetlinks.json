@@ -3,8 +3,8 @@
     "relation": ["delegate_permission/common.handle_all_urls"],
     "target": {
       "namespace": "android_app",
-      "package_name": "com.ridetogether.app",
-      "sha256_cert_fingerprints": ["REPLACE_WITH_SHA256_FROM_eas_credentials"]
+      "package_name": "com.ashutoshdevu.ridetogether",
+      "sha256_cert_fingerprints": ["0C:9A:5D:23:6E:25:83:5E:D1:1B:89:2B:B8:D9:41:D7:74:93:ED:15:E7:02:23:53:9F:6D:32:BB:42:B2:A8:5F"]
     }
   }
 ]

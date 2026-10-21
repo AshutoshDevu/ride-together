@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getApp, getApps, initializeApp } from 'firebase/app';
 import * as FirebaseAuth from 'firebase/auth';
-import { getDatabase } from 'firebase/database';
+import { connectDatabaseEmulator, getDatabase } from 'firebase/database';
 
 const firebaseConfig = {
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
@@ -41,6 +41,18 @@ function createAuth(): FirebaseAuth.Auth {
 
 export const auth = createAuth();
 export const db = getDatabase(app);
+
+/** Local demo / development: talk to the Firebase emulators (`npm run emulators`) instead of a real project. */
+const useEmulator = process.env.EXPO_PUBLIC_USE_EMULATOR === '1';
+if (useEmulator) {
+  const host = process.env.EXPO_PUBLIC_EMULATOR_HOST ?? '127.0.0.1';
+  try {
+    FirebaseAuth.connectAuthEmulator(auth, `http://${host}:9099`, { disableWarnings: true });
+    connectDatabaseEmulator(db, host, 9000);
+  } catch {
+    // Already connected (fast refresh)
+  }
+}
 
 /** Resolves to the signed-in rider's uid, signing in anonymously the first time. */
 export async function ensureSignedIn(): Promise<string> {

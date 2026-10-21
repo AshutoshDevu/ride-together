@@ -48,3 +48,9 @@ yarn-error.*
 /ios
 
 .firebase/
+
+# Firebase emulator logs
+*-debug.log
+
+# Local scratch
+_to_delete/

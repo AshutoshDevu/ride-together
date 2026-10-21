@@ -52,6 +52,34 @@ app.config.ts                app name, bundle id, permissions, map keys
 
 ---
 
+## Try it locally in the browser (no accounts needed)
+
+Runs the app against the Firebase emulators, with a Leaflet map standing in for Google Maps on web
+(`src/web/react-native-maps.tsx`, swapped in by `metro.config.js`; phones still use Google Maps).
+
+```bash
+npm install
+# .env for the demo:
+#   EXPO_PUBLIC_USE_EMULATOR=1
+#   EXPO_PUBLIC_FIREBASE_API_KEY=demo-key
+#   EXPO_PUBLIC_FIREBASE_DATABASE_URL=http://127.0.0.1:9000?ns=demo-ridetogether-default-rtdb
+#   EXPO_PUBLIC_FIREBASE_PROJECT_ID=demo-ridetogether
+npm run emulators   # terminal 1 — Firebase Auth + Realtime Database emulators
+npm run web         # terminal 2 — http://localhost:8081
+npm run simulate    # terminal 3 — 6 fake riders on a Bangalore → Nandi Hills route (prints a join link)
+```
+
+Production builds don't read `.env` — their Firebase / Maps values live in EAS environment variables
+(`npx eas-cli env:list --environment preview`).
+
+## Spending cap
+
+A ₹500/month budget on the Google Cloud project publishes to the `budget-alerts` Pub/Sub topic;
+`infra/billing-kill-switch/` is a Cloud Function that unlinks billing once spend reaches the budget
+(Maps stops, Firebase falls back to free limits). Re-link billing in the Cloud console to restore.
+
+---
+
 ## Setup (about 30 min, one time)
 
 ### 1. Tools

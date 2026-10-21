@@ -5,7 +5,8 @@ import type { Rider } from '../lib/groups';
 import { colors } from '../lib/theme';
 
 export function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
+  // Letters/digits only, so "Ashu (Duke 390)" → "AD", not "A("
+  const parts = name.trim().split(/\s+/).map((p) => p.replace(/[^\p{L}\p{N}]/gu, '')).filter(Boolean);
   if (!parts.length) return '?';
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[1][0]).toUpperCase();

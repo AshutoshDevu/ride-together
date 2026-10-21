@@ -121,10 +121,13 @@ export default function GroupMap() {
   }, [meta, start]);
 
   useEffect(() => {
-    if (keepAwake) activateKeepAwakeAsync('ride');
-    else deactivateKeepAwake('ride');
+    // Only release the lock we actually took — deactivating an inactive tag throws
+    if (!keepAwake) return;
+    activateKeepAwakeAsync('ride');
     return () => {
-      deactivateKeepAwake('ride');
+      Promise.resolve()
+        .then(() => deactivateKeepAwake('ride'))
+        .catch(() => {});
     };
   }, [keepAwake]);
 
