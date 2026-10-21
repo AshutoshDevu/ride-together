@@ -12,7 +12,7 @@
  */
 import { deleteApp, initializeApp } from 'firebase/app';
 import { connectAuthEmulator, getAuth, signInAnonymously } from 'firebase/auth';
-import { connectDatabaseEmulator, get, getDatabase, ref, serverTimestamp, set, update } from 'firebase/database';
+import { connectDatabaseEmulator, get, getDatabase, onValue, ref, serverTimestamp, set, update } from 'firebase/database';
 
 const PROJECT = 'demo-ridetogether';
 const HOST = process.env.EMULATOR_HOST ?? '127.0.0.1';
@@ -27,8 +27,9 @@ const RIDERS = [
   { name: 'Rohan', speedKmh: 37 },
 ];
 
-// Bangalore (Hebbal) → Nandi Hills, a classic Sunday-morning ride
-const ROUTE = [
+// Bangalore (Hebbal) → Nandi Hills, a classic Sunday-morning ride (rough waypoints;
+// replaced by the leader's real road route as soon as a destination is set)
+let ROUTE = [
   [13.0358, 77.5970], [13.0587, 77.5958], [13.0810, 77.5955], [13.1007, 77.5963],
   [13.1222, 77.6040], [13.1460, 77.6120], [13.1700, 77.6260], [13.1985, 77.6383],
   [13.2260, 77.6550], [13.2560, 77.6740], [13.2860, 77.6930], [13.3170, 77.7050],
@@ -51,8 +52,28 @@ function dist([aLat, aLng], [bLat, bLng]) {
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
   return 2 * 6371000 * Math.asin(Math.sqrt(h));
 }
-const SEGMENTS = ROUTE.slice(1).map((p, i) => dist(ROUTE[i], p));
-const ROUTE_LEN = SEGMENTS.reduce((a, b) => a + b, 0);
+let SEGMENTS, ROUTE_LEN;
+function useRoute(points) {
+  ROUTE = points;
+  SEGMENTS = ROUTE.slice(1).map((p, i) => dist(ROUTE[i], p));
+  ROUTE_LEN = SEGMENTS.reduce((a, b) => a + b, 0);
+}
+useRoute(ROUTE);
+
+function decodePolyline(enc) {
+  const out = [];
+  let i = 0, lat = 0, lng = 0;
+  while (i < enc.length) {
+    for (const axis of [0, 1]) {
+      let shift = 0, result = 0, b;
+      do { b = enc.charCodeAt(i++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+      const d = result & 1 ? ~(result >> 1) : result >> 1;
+      if (axis === 0) lat += d; else lng += d;
+    }
+    out.push([lat / 1e5, lng / 1e5]);
+  }
+  return out;
+}
 
 /** Position + heading at `m` metres along the route (loops at the end). */
 function along(m) {
@@ -110,6 +131,16 @@ async function main() {
   }
   console.log(`${riders.length} riders on the road. Join in the app with code ${code}`);
   console.log(`  or open http://localhost:8081/app/join/${code}\nCtrl+C to stop.\n`);
+
+  // Follow the leader's shared route (real roads) whenever one is set
+  onValue(ref(riders[0].db, `groups/${code}/destination`), (snap) => {
+    const d = snap.val();
+    if (d?.polyline) {
+      useRoute(decodePolyline(d.polyline));
+      riders.forEach((r, i) => (r.metres = 4000 - i * 650));
+      console.log(`\nRiding the leader's route to ${d.name} (${(ROUTE_LEN / 1000).toFixed(1)} km)`);
+    }
+  });
 
   const startedAt = Date.now();
   const timer = setInterval(async () => {

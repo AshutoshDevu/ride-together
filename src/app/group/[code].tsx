@@ -6,6 +6,7 @@ import { ActivityIndicator, Alert, Linking, Modal, Platform, Pressable, StyleShe
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE, type Region } from 'react-native-maps';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DestinationPicker } from '../../components/DestinationPicker';
+import { NavGroupStrip, type GroupStripItem } from '../../components/NavGroupStrip';
 import { NavBanner, NavFooter } from '../../components/NavigationHUD';
 import { RiderList, type RiderRow } from '../../components/RiderList';
 import { RiderMarker } from '../../components/RiderMarker';
@@ -31,7 +32,7 @@ import {
   type RiderStatus,
 } from '../../lib/groups';
 import { useSession } from '../../lib/session';
-import { getCurrentFix, useTurnByTurn, type Fix } from '../../lib/navigation';
+import { gapAlongRoute, getCurrentFix, navZoom, useTurnByTurn, type Fix } from '../../lib/navigation';
 import { computeTwoWheelerRoute, decodePolyline, formatDuration, type PlaceResult } from '../../lib/places';
 import { setActiveGroup } from '../../lib/storage';
 import { colors, radius } from '../../lib/theme';
@@ -179,7 +180,12 @@ export default function GroupMap() {
     // GPS heading is noise when standing still — keep the last good one
     if (myFix.heading != null && myFix.heading >= 0 && (myFix.speed ?? 0) > 1.5) lastHeading.current = myFix.heading;
     mapRef.current?.animateCamera(
-      { center: { latitude: myFix.latitude, longitude: myFix.longitude }, heading: lastHeading.current, pitch: 45, zoom: 17 },
+      {
+        center: { latitude: myFix.latitude, longitude: myFix.longitude },
+        heading: lastHeading.current,
+        pitch: 45,
+        zoom: navZoom(myFix.speed),
+      },
       { duration: 800 },
     );
   }, [navActive, follow, myFix]);
@@ -206,6 +212,26 @@ export default function GroupMap() {
 
   const located = rows.filter((r) => r.loc && !r.stale);
   const alerts = rows.filter((r) => r.loc && r.loc.status && r.loc.status !== 'ok');
+
+  // Where everyone is relative to me along my route — most riders are off-screen when zoomed in
+  const groupStrip: GroupStripItem[] = useMemo(() => {
+    if (!navActive || !nav.route || !nav.progress) return [];
+    const route = nav.route, me = nav.progress;
+    return rows
+      .filter((r) => r.uid !== uid && r.loc)
+      .map((r) => {
+        const { gapM } = gapAlongRoute(route, me, { latitude: r.loc!.lat, longitude: r.loc!.lng });
+        return { rider: r, gapM, distanceM: r.distance, stale: r.stale };
+      })
+      .sort((a, b) => {
+        const alert = (i: GroupStripItem) => ((i.rider.loc?.status ?? 'ok') !== 'ok' ? 1 : 0);
+        if (alert(a) !== alert(b)) return alert(b) - alert(a);
+        if ((a.gapM == null) !== (b.gapM == null)) return a.gapM == null ? 1 : -1;
+        if (a.gapM == null) return (a.distanceM ?? Infinity) - (b.distanceM ?? Infinity); // off route: nearest first
+        return (b.gapM ?? 0) - (a.gapM ?? 0); // on route: furthest ahead first
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navActive, nav.route, nav.progress?.remainingM, rows, uid]);
 
   /** Distance between the two riders furthest apart — "how stretched is the group?" */
   const spread = useMemo(() => {
@@ -515,6 +541,16 @@ export default function GroupMap() {
             <Text style={styles.inviteText}>+ Invite</Text>
           </Pressable>
         </View>
+        )}
+
+        {navActive && (
+          <NavGroupStrip
+            items={groupStrip}
+            onSelect={(r) => {
+              setFollow(false);
+              focusRider(r);
+            }}
+          />
         )}
 
         {alerts.map((r) => (

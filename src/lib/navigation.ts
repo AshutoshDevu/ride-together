@@ -54,9 +54,14 @@ function projectOnSegment(p: LatLng, a: LatLng, b: LatLng) {
   return { dist: Math.hypot(x, y), t };
 }
 
-export function computeProgress(route: NavRoute, p: LatLng, fromStep: number): NavProgress {
+export function computeProgress(
+  route: NavRoute,
+  p: LatLng,
+  fromStep: number,
+  lookahead = LOOKAHEAD_STEPS,
+): NavProgress {
   let best = { step: fromStep, seg: 0, t: 0, dist: Infinity };
-  const last = Math.min(route.steps.length - 1, fromStep + LOOKAHEAD_STEPS);
+  const last = Math.min(route.steps.length - 1, fromStep + lookahead);
   for (let s = Math.max(0, fromStep); s <= last; s++) {
     const pts = route.steps[s].points;
     for (let i = 0; i < pts.length - 1; i++) {
@@ -80,6 +85,24 @@ export function computeProgress(route: NavRoute, p: LatLng, fromStep: number): N
     remainingS += route.steps[s].durationS;
   }
   return { stepIdx: best.step, toNextM, remainingM, remainingS, offRouteM: best.dist };
+}
+
+/**
+ * Where another rider is relative to me along my route: positive = ahead of me.
+ * `null` gap when they're not on (or near) the route — then only the straight-line distance is meaningful.
+ */
+export function gapAlongRoute(route: NavRoute, me: NavProgress, other: LatLng): { gapM: number | null; offRouteM: number } {
+  const o = computeProgress(route, other, 0, route.steps.length);
+  if (o.offRouteM > 250) return { gapM: null, offRouteM: o.offRouteM };
+  return { gapM: me.remainingM - o.remainingM, offRouteM: o.offRouteM };
+}
+
+/** Closer in town, further out at highway speed, so nearby riders stay on screen. */
+export function navZoom(speedMs: number | null | undefined): number {
+  const kmh = (speedMs ?? 0) * 3.6;
+  if (kmh > 70) return 14.5;
+  if (kmh > 40) return 15.2;
+  return 16;
 }
 
 function spokenDistance(m: number): string {
