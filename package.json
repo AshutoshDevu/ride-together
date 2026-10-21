@@ -38,7 +38,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "typecheck": "tsc --noEmit",
-    "deploy:firebase": "firebase deploy --only hosting,database",
+    "deploy:firebase": "npm run build:web && firebase deploy --only hosting,database",
     "web": "expo start --web",
     "emulators": "firebase emulators:start --only auth,database,hosting --project demo-ridetogether",
     "simulate": "node scripts/simulate-ride.mjs",
