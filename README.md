@@ -2,22 +2,25 @@
 
 One shared Google Map for the whole riding group. Create a ride, drop the invite link in your WhatsApp group, and every rider who joins shows up as a small coloured marker that moves in real time — so nobody gets lost on long rides.
 
-**One codebase → Android + iOS** (Expo / React Native + TypeScript, Firebase backend).
+**One codebase → Android, iOS and web** (Expo / React Native + TypeScript, Firebase backend, Google Maps / Places / Routes).
+Web app: <https://ridetogether-ashu.web.app/app/> · Android APK: [latest release](https://github.com/AshutoshDevu/ride-together/releases/latest).
 
 ## Features
 
 | | |
 |---|---|
-| **Create a ride** | Gets a 6-character code (e.g. `K7QM2X`) and an invite link |
-| **WhatsApp invite** | One tap opens WhatsApp with the link pre-filled; anyone who taps it lands on the "Join ride" screen |
-| **Live map** | Tiny marker per rider (colour + initials + name tag), leader marked with ★, you are the blue dot |
-| **Background sharing** | Keeps sharing with the phone locked in a mount/pocket (Android foreground-service notification, iOS "Always" location) |
-| **Rider list** | Sorted by distance from you, with speed, battery % and "last seen" |
-| **Lost-signal detection** | Rider turns grey and shows "Signal lost" after 2 min without an update |
-| **Group spread** | Top bar shows the distance between the first and last rider |
-| **✋ Stop / 🆘 SOS** | Rider's marker turns yellow/red and a banner appears for everyone; tap it to jump to them |
-| **Fit all / Me / Screen-on** | Buttons to zoom to the whole group, centre on yourself, and keep the screen awake |
-| Big-group friendly | Name tags auto-hide when zoomed far out; markers are optimised to not re-render constantly |
+| **Accounts** | Sign in with Google or mobile number (SMS OTP); rider profile with name, bike and city |
+| **Create / join a ride** | 6-character code + WhatsApp invite link; laptops open the web app |
+| **Live map** | Apple-Maps-style light and dark map on Google Maps; each rider has a unique colour, heading arrow and a name + speed tag everyone sees |
+| **Live light & signal loss** | Each marker's light flashes on every update, amber after 20 s, red after 60 s — with a beep + banner when someone's signal is lost |
+| **Background sharing** | Keeps sharing with the phone locked (Android foreground service, iOS "Always") |
+| **✋ Stop / 🆘 SOS** | Marker turns yellow/red and a banner appears for everyone |
+| **Destination + navigation** | Leader sets the destination (search or long-press); everyone gets in-app voice turn-by-turn on the same two-wheeler route, with rerouting and a "who's ahead/behind" strip |
+| **Ride history** | Your route coloured by speed, distance, moving time, average and top speed, who rode |
+| **Clubs** | Open or approval-only clubs with chat, discussion board, members & roles |
+| **Group rides** | Admins schedule rides (date, meeting point, destination); members RSVP; organiser starts the live ride and everyone joins from the Ride tab |
+| **Community** | Public forum filtered by city, with replies and reporting |
+| **End ride** | Leader ends the ride for everyone; history is saved automatically |
 
 ## How it works
 

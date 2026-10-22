@@ -42,6 +42,9 @@ export type RideRecord = {
   riders: string[];
   wasLeader: boolean;
   destination: string | null;
+  /** Club group ride this was part of */
+  clubId?: string | null;
+  eventId?: string | null;
 };
 export type RideEntry = RideRecord & { id: string };
 
@@ -114,6 +117,8 @@ export async function finalizeRide(code: string, uid: string): Promise<RideRecor
       riders: Object.values(members).map((m) => m.name).slice(0, 50),
       wasLeader: meta?.createdBy === uid,
       destination: dest?.name ?? null,
+      clubId: meta?.clubId ?? null,
+      eventId: meta?.eventId ?? null,
     };
 
     const id = `${code}-${record.startedAt}`;

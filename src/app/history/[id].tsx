@@ -159,6 +159,14 @@ export default function RideDetail() {
           <Stat label={ride.wasLeader ? 'Riders · you led' : 'Riders'} value={String(ride.riders.length || 1)} />
         </View>
 
+        {!!ride.clubId && !!ride.eventId && (
+          <Button
+            title="Open the club ride"
+            variant="secondary"
+            onPress={() => router.push({ pathname: '/clubs/[id]/event/[eventId]', params: { id: ride.clubId!, eventId: ride.eventId! } })}
+          />
+        )}
+
         {!!ride.destination && (
           <View style={styles.card}>
             <Text style={styles.section}>Destination</Text>

@@ -4,7 +4,7 @@ import { assertFails, assertSucceeds, initializeTestEnvironment } from '@firebas
 import { readFileSync } from 'node:fs';
 import { test, after, before, beforeEach } from 'node:test';
 import { ref, set, update, get } from 'firebase/database';
-import { doc, getDoc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc, serverTimestamp, writeBatch, increment, updateDoc, addDoc, collection, getDocs, query, where, collectionGroup } from 'firebase/firestore';
 
 let env;
 before(async () => {
@@ -111,4 +111,122 @@ test('saved rides cannot be edited and fields are checked', async () => {
   await assertFails(setDoc(doc(fs, 'users/ashu/rides/r1'), { ...ride, distanceM: 999999 }));
   await assertFails(setDoc(doc(fs, 'users/ashu/rides/r3'), { ...ride, hacked: true }));
   await assertFails(setDoc(doc(fs, 'users/ashu/rides/r4'), { ...ride, speeds: new Array(2001).fill(1) }));
+});
+
+// ---------- Firestore: clubs ----------
+
+async function makeClub(fs, id, owner, joinPolicy = 'open') {
+  const b = writeBatch(fs);
+  b.set(doc(fs, `clubs/${id}`), {
+    name: 'Bangalore Riders', nameLower: 'bangalore riders', description: '', city: 'Bengaluru', cityLower: 'bengaluru',
+    joinPolicy, ownerId: owner, ownerName: 'Owner', memberCount: 1, createdAt: 1, lastActivityAt: 1,
+  });
+  b.set(doc(fs, `clubs/${id}/members/${owner}`), { uid: owner, name: 'Owner', role: 'owner', clubName: 'Bangalore Riders', joinedAt: 1 });
+  return b.commit();
+}
+function joinBatch(fs, id, uid) {
+  const b = writeBatch(fs);
+  b.set(doc(fs, `clubs/${id}/members/${uid}`), { uid, name: uid, role: 'member', clubName: 'Bangalore Riders', joinedAt: 1 });
+  b.update(doc(fs, `clubs/${id}`), { memberCount: increment(1) });
+  return b.commit();
+}
+
+test('anyone signed in can found a club (owner membership in the same batch)', async () => {
+  await assertSucceeds(makeClub(google('ashu').firestore(), 'c1', 'ashu'));
+  // claiming to be someone else's club fails
+  await assertFails(makeClub(google('meera').firestore(), 'c2', 'ashu'));
+});
+
+test('open club: self-join and leave keep the member count right', async () => {
+  await makeClub(google('ashu').firestore(), 'c1', 'ashu', 'open');
+  const fs = google('meera').firestore();
+  await assertSucceeds(joinBatch(fs, 'c1', 'meera'));
+  // can't bump the count without actually joining
+  await assertFails(updateDoc(doc(google('kabir').firestore(), 'clubs/c1'), { memberCount: increment(1) }));
+  const b = writeBatch(fs);
+  b.delete(doc(fs, 'clubs/c1/members/meera'));
+  b.update(doc(fs, 'clubs/c1'), { memberCount: increment(-1) });
+  await assertSucceeds(b.commit());
+});
+
+test('approval club: no self-join; request → admin approves', async () => {
+  await makeClub(google('ashu').firestore(), 'c1', 'ashu', 'approval');
+  const meera = google('meera').firestore();
+  await assertFails(joinBatch(meera, 'c1', 'meera'));
+  await assertSucceeds(setDoc(doc(meera, 'clubs/c1/joinRequests/meera'), { uid: 'meera', name: 'Meera', createdAt: 1 }));
+  // another rider can't approve
+  await assertFails(joinBatch(google('kabir').firestore(), 'c1', 'meera'));
+  const owner = google('ashu').firestore();
+  const b = writeBatch(owner);
+  b.set(doc(owner, 'clubs/c1/members/meera'), { uid: 'meera', name: 'Meera', role: 'member', clubName: 'x', joinedAt: 1 });
+  b.update(doc(owner, 'clubs/c1'), { memberCount: increment(1) });
+  b.delete(doc(owner, 'clubs/c1/joinRequests/meera'));
+  await assertSucceeds(b.commit());
+});
+
+test('club chat is members-only; authors and admins can delete', async () => {
+  await makeClub(google('ashu').firestore(), 'c1', 'ashu');
+  await joinBatch(google('meera').firestore(), 'c1', 'meera');
+  const msg = { uid: 'meera', name: 'Meera', text: 'Ride on Sunday?', createdAt: 1 };
+  await assertSucceeds(setDoc(doc(google('meera').firestore(), 'clubs/c1/messages/m1'), msg));
+  await assertFails(getDoc(doc(google('outsider').firestore(), 'clubs/c1/messages/m1')));
+  await assertFails(setDoc(doc(google('outsider').firestore(), 'clubs/c1/messages/m2'), { ...msg, uid: 'outsider' }));
+  await assertFails(setDoc(doc(google('meera').firestore(), 'clubs/c1/messages/m3'), { ...msg, uid: 'ashu' })); // spoofing
+  await assertSucceeds(deleteDoc(doc(google('ashu').firestore(), 'clubs/c1/messages/m1'))); // owner moderates
+});
+
+test('roles: only the owner promotes; members cannot remove each other; owner cannot be removed', async () => {
+  await makeClub(google('ashu').firestore(), 'c1', 'ashu');
+  await joinBatch(google('meera').firestore(), 'c1', 'meera');
+  await joinBatch(google('kabir').firestore(), 'c1', 'kabir');
+  await assertFails(updateDoc(doc(google('meera').firestore(), 'clubs/c1/members/kabir'), { role: 'admin' }));
+  await assertSucceeds(updateDoc(doc(google('ashu').firestore(), 'clubs/c1/members/meera'), { role: 'admin' }));
+  await assertFails(deleteDoc(doc(google('kabir').firestore(), 'clubs/c1/members/meera')));
+  await assertFails(deleteDoc(doc(google('meera').firestore(), 'clubs/c1/members/ashu')));
+});
+
+test('group rides: admins schedule; members RSVP with a matching count', async () => {
+  await makeClub(google('ashu').firestore(), 'c1', 'ashu');
+  await joinBatch(google('meera').firestore(), 'c1', 'meera');
+  const ev = { title: 'Nandi sunrise', notes: '', startAt: 9e12, meetPoint: null, destination: null, createdBy: 'meera',
+    createdByName: 'Meera', status: 'scheduled', rideCode: null, rsvpCount: 0, createdAt: 1 };
+  await assertFails(setDoc(doc(google('meera').firestore(), 'clubs/c1/events/e1'), ev)); // members can't schedule
+  await assertSucceeds(setDoc(doc(google('ashu').firestore(), 'clubs/c1/events/e1'), { ...ev, createdBy: 'ashu' }));
+  const fs = google('meera').firestore();
+  const b = writeBatch(fs);
+  b.set(doc(fs, 'clubs/c1/events/e1/rsvps/meera'), { uid: 'meera', name: 'Meera', createdAt: 1 });
+  b.update(doc(fs, 'clubs/c1/events/e1'), { rsvpCount: increment(1) });
+  await assertSucceeds(b.commit());
+  await assertFails(updateDoc(doc(fs, 'clubs/c1/events/e1'), { rsvpCount: increment(5) }));
+  await assertFails(updateDoc(doc(fs, 'clubs/c1/events/e1'), { status: 'live', rideCode: 'ABC234' })); // not organiser
+  await assertSucceeds(updateDoc(doc(google('ashu').firestore(), 'clubs/c1/events/e1'), { status: 'live', rideCode: 'ABC234' }));
+});
+
+test('"my clubs" collection-group query only returns my own memberships', async () => {
+  await makeClub(google('ashu').firestore(), 'c1', 'ashu');
+  await assertSucceeds(getDocs(query(collectionGroup(google('ashu').firestore(), 'members'), where('uid', '==', 'ashu'))));
+});
+
+// ---------- Firestore: community forum ----------
+const post = { title: 'Best sunrise ride near Bengaluru?', body: 'Nandi or Skandagiri?', city: 'Bengaluru',
+  authorId: 'meera', authorName: 'Meera', replyCount: 0, createdAt: 1, lastActivityAt: 1 };
+
+test('forum: post as yourself, reply bumps the count by one, only authors delete', async () => {
+  const meera = google('meera').firestore();
+  await assertSucceeds(setDoc(doc(meera, 'forum/t1'), post));
+  await assertFails(setDoc(doc(meera, 'forum/t2'), { ...post, authorId: 'ashu' }));
+  const kabir = google('kabir').firestore();
+  const b = writeBatch(kabir);
+  b.set(doc(kabir, 'forum/t1/replies/r1'), { body: 'Skandagiri!', authorId: 'kabir', authorName: 'Kabir', createdAt: 1 });
+  b.update(doc(kabir, 'forum/t1'), { replyCount: increment(1), lastActivityAt: 2 });
+  await assertSucceeds(b.commit());
+  await assertFails(updateDoc(doc(kabir, 'forum/t1'), { title: 'hijacked' }));
+  await assertFails(deleteDoc(doc(kabir, 'forum/t1')));
+  await assertFails(getDoc(doc(anon('old').firestore(), 'forum/t1')));
+});
+
+test('reports: riders can file them but not read them', async () => {
+  const fs = google('meera').firestore();
+  await assertSucceeds(addDoc(collection(fs, 'reports'), { path: 'forum/t1', reason: 'spam', reporterId: 'meera', createdAt: 1 }));
+  await assertFails(getDocs(collection(fs, 'reports')));
 });

@@ -1,5 +1,5 @@
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button, Input } from '../../components/ui';
 import { CODE_LENGTH, createGroup, getGroupMeta, isMember, joinGroup, normalizeCode } from '../../lib/groups';
 import { notify } from '../../lib/dialog';
+import { eventWhen, subscribeMyClubs, upcomingRidesFor, type ClubEvent } from '../../lib/clubs';
 import { useSession } from '../../lib/session';
 import { getActiveGroup, setActiveGroup } from '../../lib/storage';
 import { makeStyles, radius, useTheme } from '../../lib/theme';
@@ -25,6 +26,17 @@ export default function Home() {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState<'create' | 'join' | null>(null);
   const [resume, setResume] = useState<{ code: string; name: string } | null>(null);
+  const [clubIds, setClubIds] = useState<string[]>([]);
+  const [clubRides, setClubRides] = useState<ClubEvent[]>([]);
+
+  // Upcoming / live group rides from my clubs
+  useEffect(() => (uid ? subscribeMyClubs(uid, (m) => setClubIds(m.map((x) => x.clubId)), () => {}) : undefined), [uid]);
+  useFocusEffect(
+    useCallback(() => {
+      if (!clubIds.length) return setClubRides([]);
+      upcomingRidesFor(clubIds).then((r) => setClubRides(r.slice(0, 4))).catch(() => {});
+    }, [clubIds]),
+  );
 
   // Riders appear to the group under their profile name (edit it in the Profile tab)
   const riderName = name.trim();
@@ -123,6 +135,29 @@ export default function Home() {
             </Pressable>
           )}
 
+          {clubRides.length > 0 && (
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Your club rides</Text>
+              {clubRides.map((e) => (
+                <Pressable
+                  key={`${e.clubId}-${e.id}`}
+                  style={styles.clubRide}
+                  onPress={() => router.push({ pathname: '/clubs/[id]/event/[eventId]', params: { id: e.clubId, eventId: e.id } })}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.clubRideTitle} numberOfLines={1}>{e.title}</Text>
+                    <Text style={[styles.hint, e.status === 'live' && { color: colors.ok, fontWeight: '800' }]}>
+                      {e.status === 'live' ? '● Ride is live' : eventWhen(e.startAt)}
+                    </Text>
+                  </View>
+                  <Text style={[styles.clubRideAction, e.status === 'live' && { backgroundColor: colors.ok, color: '#fff' }]}>
+                    {e.status === 'live' ? 'Join' : 'View'}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
+
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Start a new ride</Text>
             <Input
@@ -182,4 +217,15 @@ const useStyles = makeStyles((colors) => ({
   resume: { backgroundColor: colors.accent, borderColor: colors.accent, gap: 4 },
   resumeLabel: { color: colors.accentText, fontSize: 12, fontWeight: '800', letterSpacing: 1 },
   resumeName: { color: colors.accentText, fontSize: 22, fontWeight: '800' },
+  clubRide: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 },
+  clubRideTitle: { color: colors.text, fontSize: 16, fontWeight: '800' },
+  clubRideAction: {
+    color: colors.text,
+    backgroundColor: colors.surfaceHigh,
+    fontWeight: '800',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: radius.sm,
+    overflow: 'hidden',
+  },
 }));

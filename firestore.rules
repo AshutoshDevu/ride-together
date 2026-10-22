@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// Cloud Firestore: profiles now; clubs, forums and ride history arrive with their phases.
+// Cloud Firestore: profiles, ride history, clubs (chat, board, group rides) and the community forum.
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -35,7 +35,7 @@ service cloud.firestore {
           && request.auth.uid == uid
           && request.resource.data.keys().hasOnly([
                'code', 'name', 'startedAt', 'endedAt', 'durationS', 'movingS', 'distanceM', 'avgKmh', 'maxKmh',
-               'polyline', 'speeds', 'riders', 'wasLeader', 'destination', 'createdAt'])
+               'polyline', 'speeds', 'riders', 'wasLeader', 'destination', 'clubId', 'eventId', 'createdAt'])
           && request.resource.data.code is string && request.resource.data.code.size() <= 12
           && request.resource.data.name is string && request.resource.data.name.size() <= 60
           && request.resource.data.startedAt is number && request.resource.data.endedAt is number
@@ -47,6 +47,182 @@ service cloud.firestore {
         // A finished ride is a record — no edits
         allow update: if false;
       }
+    }
+
+    // ================= clubs =================
+    function clubPath(clubId) { return /databases/$(database)/documents/clubs/$(clubId); }
+    function memberPath(clubId, uid) { return /databases/$(database)/documents/clubs/$(clubId)/members/$(uid); }
+    function isMember(clubId) { return signedIn() && exists(memberPath(clubId, request.auth.uid)); }
+    function roleIn(clubId, roles) {
+      return isMember(clubId) && get(memberPath(clubId, request.auth.uid)).data.role in roles;
+    }
+    function isAdmin(clubId) { return roleIn(clubId, ['owner', 'admin']); }
+    function isOwner(clubId) { return roleIn(clubId, ['owner']); }
+    function text(v, min, max) { return v is string && v.size() >= min && v.size() <= max; }
+    function onlyChanges(keys) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys); }
+    // member count moves by exactly one, in the same batch as a member joining / leaving
+    function countStep(d) { return request.resource.data.memberCount == resource.data.memberCount + d; }
+
+    match /clubs/{clubId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['name', 'nameLower', 'description', 'city', 'cityLower', 'joinPolicy',
+             'ownerId', 'ownerName', 'memberCount', 'createdAt', 'lastActivityAt'])
+        && request.resource.data.ownerId == request.auth.uid
+        && text(request.resource.data.name, 3, 60)
+        && request.resource.data.description is string && request.resource.data.description.size() <= 1000
+        && request.resource.data.city is string && request.resource.data.city.size() <= 40
+        && request.resource.data.joinPolicy in ['open', 'approval']
+        && request.resource.data.memberCount == 1
+        // the owner's membership is created in the same batch
+        && getAfter(memberPath(clubId, request.auth.uid)).data.role == 'owner';
+      allow update: if
+        // owner / admins: club settings
+        (isAdmin(clubId) && onlyChanges(['name', 'nameLower', 'description', 'city', 'cityLower', 'joinPolicy'])
+          && text(request.resource.data.name, 3, 60) && request.resource.data.joinPolicy in ['open', 'approval'])
+        // any member: activity time (chat / posts)
+        || (isMember(clubId) && onlyChanges(['lastActivityAt']))
+        // joining (own membership appears in this batch) / leaving / admin approve or remove
+        || (signedIn() && onlyChanges(['memberCount']) && (
+              (countStep(1) && existsAfter(memberPath(clubId, request.auth.uid)) && !exists(memberPath(clubId, request.auth.uid))
+                 && resource.data.joinPolicy == 'open')
+           || (countStep(-1) && exists(memberPath(clubId, request.auth.uid)) && !existsAfter(memberPath(clubId, request.auth.uid)))
+           || (isAdmin(clubId) && (countStep(1) || countStep(-1)))));
+      allow delete: if isOwner(clubId);
+
+      match /members/{uid} {
+        allow read: if signedIn();
+        allow create: if signedIn()
+          && request.resource.data.uid == uid
+          && text(request.resource.data.name, 1, 40)
+          && request.resource.data.clubName is string
+          && (
+            // founding owner, in the club-creating batch
+            (uid == request.auth.uid && request.resource.data.role == 'owner' && !exists(clubPath(clubId))
+               && getAfter(clubPath(clubId)).data.ownerId == uid)
+            // self-join an open club
+            || (uid == request.auth.uid && request.resource.data.role == 'member'
+               && get(clubPath(clubId)).data.joinPolicy == 'open')
+            // admin approves a pending request
+            || (isAdmin(clubId) && request.resource.data.role == 'member'
+               && exists(/databases/$(database)/documents/clubs/$(clubId)/joinRequests/$(uid))));
+        // owner promotes / demotes admins (never touches the owner's own record)
+        allow update: if isOwner(clubId) && resource.data.role != 'owner'
+          && onlyChanges(['role']) && request.resource.data.role in ['admin', 'member'];
+        // leave (not the owner) / admins remove regular members / owner removes anyone else
+        allow delete: if signedIn() && resource.data.role != 'owner' && (
+          uid == request.auth.uid
+          || (isAdmin(clubId) && resource.data.role == 'member')
+          || isOwner(clubId));
+      }
+
+      match /joinRequests/{uid} {
+        allow read: if signedIn() && (uid == request.auth.uid || isAdmin(clubId));
+        allow create: if signedIn() && uid == request.auth.uid && !isMember(clubId)
+          && get(clubPath(clubId)).data.joinPolicy == 'approval'
+          && request.resource.data.keys().hasOnly(['uid', 'name', 'createdAt'])
+          && request.resource.data.uid == uid && text(request.resource.data.name, 1, 40);
+        allow delete: if signedIn() && (uid == request.auth.uid || isAdmin(clubId));
+      }
+
+      // club chat
+      match /messages/{id} {
+        allow read: if isMember(clubId);
+        allow create: if isMember(clubId)
+          && request.resource.data.keys().hasOnly(['uid', 'name', 'text', 'createdAt'])
+          && request.resource.data.uid == request.auth.uid && text(request.resource.data.text, 1, 1000);
+        allow delete: if signedIn() && (resource.data.uid == request.auth.uid || isAdmin(clubId));
+      }
+
+      // club discussion board
+      match /threads/{t} {
+        allow read: if isMember(clubId);
+        allow create: if isMember(clubId) && validThread();
+        allow update: if (isMember(clubId) && resource.data.authorId == request.auth.uid
+                            && onlyChanges(['title', 'body']) && text(request.resource.data.title, 3, 120))
+          || (isMember(clubId) && replyCountStep());
+        allow delete: if signedIn() && (resource.data.authorId == request.auth.uid || isAdmin(clubId));
+        match /replies/{r} {
+          allow read: if isMember(clubId);
+          allow create: if isMember(clubId) && validReply();
+          allow delete: if signedIn() && (resource.data.authorId == request.auth.uid || isAdmin(clubId));
+        }
+      }
+
+      // scheduled group rides
+      match /events/{e} {
+        allow read: if isMember(clubId);
+        allow create: if isAdmin(clubId)
+          && request.resource.data.keys().hasOnly(['title', 'notes', 'startAt', 'meetPoint', 'destination', 'createdBy',
+               'createdByName', 'status', 'rideCode', 'rsvpCount', 'createdAt'])
+          && request.resource.data.createdBy == request.auth.uid
+          && text(request.resource.data.title, 3, 80) && request.resource.data.startAt is number
+          && request.resource.data.status == 'scheduled' && request.resource.data.rsvpCount == 0;
+        allow update: if
+          // organiser / admins start or finish the ride
+          ((resource.data.createdBy == request.auth.uid || isAdmin(clubId)) && onlyChanges(['status', 'rideCode'])
+             && request.resource.data.status in ['scheduled', 'live', 'done'])
+          // members RSVP: count moves by one together with their own RSVP
+          || (isMember(clubId) && onlyChanges(['rsvpCount']) && (
+               (request.resource.data.rsvpCount == resource.data.rsvpCount + 1
+                  && existsAfter(/databases/$(database)/documents/clubs/$(clubId)/events/$(e)/rsvps/$(request.auth.uid)))
+            || (request.resource.data.rsvpCount == resource.data.rsvpCount - 1
+                  && !existsAfter(/databases/$(database)/documents/clubs/$(clubId)/events/$(e)/rsvps/$(request.auth.uid)))));
+        allow delete: if signedIn() && (resource.data.createdBy == request.auth.uid || isAdmin(clubId));
+        match /rsvps/{uid} {
+          allow read: if isMember(clubId);
+          allow create: if isMember(clubId) && uid == request.auth.uid
+            && request.resource.data.keys().hasOnly(['uid', 'name', 'createdAt']) && request.resource.data.uid == uid;
+          allow delete: if signedIn() && uid == request.auth.uid;
+        }
+      }
+    }
+
+    // "My clubs": collection-group query on members where uid == me
+    match /{path=**}/members/{uid} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+    }
+
+    // ================= threads (shared shape) =================
+    function validThread() {
+      return request.resource.data.keys().hasOnly(['title', 'body', 'city', 'authorId', 'authorName', 'replyCount',
+               'createdAt', 'lastActivityAt'])
+        && request.resource.data.authorId == request.auth.uid
+        && text(request.resource.data.title, 3, 120)
+        && request.resource.data.body is string && request.resource.data.body.size() <= 5000
+        && request.resource.data.replyCount == 0;
+    }
+    function validReply() {
+      return request.resource.data.keys().hasOnly(['body', 'authorId', 'authorName', 'createdAt'])
+        && request.resource.data.authorId == request.auth.uid && text(request.resource.data.body, 1, 5000);
+    }
+    // reply count moves by one (with a reply in the same batch); activity time may move with it
+    function replyCountStep() {
+      return onlyChanges(['replyCount', 'lastActivityAt'])
+        && (request.resource.data.replyCount == resource.data.replyCount + 1
+            || request.resource.data.replyCount == resource.data.replyCount - 1);
+    }
+
+    // ================= community forum (public) =================
+    match /forum/{t} {
+      allow read: if signedIn();
+      allow create: if signedIn() && validThread();
+      allow update: if (signedIn() && resource.data.authorId == request.auth.uid
+                          && onlyChanges(['title', 'body', 'city']) && text(request.resource.data.title, 3, 120))
+        || (signedIn() && replyCountStep());
+      allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
+      match /replies/{r} {
+        allow read: if signedIn();
+        allow create: if signedIn() && validReply();
+        allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
+      }
+    }
+
+    // reports — write-only for riders, reviewed in the Firebase console
+    match /reports/{id} {
+      allow create: if signedIn() && request.resource.data.reporterId == request.auth.uid
+        && request.resource.data.keys().hasOnly(['path', 'reason', 'reporterId', 'createdAt'])
+        && text(request.resource.data.path, 1, 300) && request.resource.data.reason is string;
     }
   }
 }

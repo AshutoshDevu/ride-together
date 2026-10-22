@@ -25,7 +25,15 @@ import { db } from './firebase';
 export type RiderStatus = 'ok' | 'stop' | 'sos';
 
 /** `endedAt` is set once by the leader; after that nobody can join or share a location. */
-export type GroupMeta = { name: string; createdBy: string; createdAt: number; endedAt?: number };
+export type GroupMeta = {
+  name: string;
+  createdBy: string;
+  createdAt: number;
+  endedAt?: number;
+  /** Started from a club's scheduled group ride */
+  clubId?: string;
+  eventId?: string;
+};
 export type Member = { name: string; color: string; colorIdx?: number; joinedAt: number };
 export type RiderLocation = {
   lat: number;
@@ -124,13 +132,18 @@ function randomCode(): string {
   return c;
 }
 
-export async function createGroup(groupName: string, uid: string, riderName: string): Promise<string> {
+export async function createGroup(
+  groupName: string,
+  uid: string,
+  riderName: string,
+  link?: { clubId: string; eventId: string },
+): Promise<string> {
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = randomCode();
     const exists = await get(ref(db, `groups/${code}/meta`));
     if (exists.exists()) continue;
     await update(ref(db, `groups/${code}`), {
-      meta: { name: groupName.trim() || 'Group ride', createdBy: uid, createdAt: serverTimestamp() },
+      meta: { name: groupName.trim() || 'Group ride', createdBy: uid, createdAt: serverTimestamp(), ...(link ?? {}) },
       // The ride is brand new, so the leader always gets the first colour
       [`members/${uid}`]: { name: riderName, color: RIDER_COLORS[0], colorIdx: 0, joinedAt: serverTimestamp() },
       'colors/0': uid,
